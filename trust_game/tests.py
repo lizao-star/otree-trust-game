@@ -28,6 +28,8 @@ class PlayerBot(Bot):
 
     # oTree 的 runner（otree/bots/runner.py）按 case 逐个重跑整个 session，
     # 同一 session 内所有 bot 共用同一个 case，故同组两人的情形始终一致。
+    # 两个 case 在**两个处理组**里都必须走不同路径：normal 送 10（基线为 5），
+    # zero_send 送 0，使 x=0 的奖金规则在基线与沟通组各有一条真实覆盖。
     cases = ['normal', 'zero_send']
 
     def play_round(self):
@@ -39,7 +41,7 @@ class PlayerBot(Bot):
         # 直接读取会抛 NullFieldError，那样就看不到 check_round 里那条指明根因的
         # 断言了；此处退化为 Falsy 走基线流程，由前置条件断言负责拦截。
         if self.player.field_maybe_none('is_communication'):
-            yield from communication_round(self)
+            yield from communication_round(self, zero_send=zero_send)
         else:
             yield from baseline_round(self, zero_send=zero_send)
         check_round(self, zero_send=zero_send)
@@ -84,8 +86,13 @@ def baseline_round(bot, zero_send=False):
     yield Results
 
 
-def communication_round(bot):
-    """沟通组（communication=True）流程：决策前双方各发一条消息并互相可见。"""
+def communication_round(bot, zero_send=False):
+    """沟通组（communication=True）流程：决策前双方各发一条消息并互相可见。
+
+    zero_send=True 时投资者送 0 点，使 x=0 路径**穿过** MessageSend /
+    MessageReveal（此前两个 case 走的是同一条 x=10 路径，case 1 纯属重复，
+    既浪费一倍运行时间，又让 x=0 在沟通组完全没有覆盖）。
+    """
     yield Submission(ComprehensionCheck,
                      dict(comp_q1=10, comp_q2=12, comp_q3=12),
                      check_html=False)
@@ -105,27 +112,34 @@ def communication_round(bot):
                          check_html=False)
     # MessageWaitPage 由框架自动处理，bot 不得 yield
     yield MessageReveal
+    send = 0 if zero_send else 10
     if bot.player.role == C.INVESTOR_ROLE:
         yield Submission(BeliefElicit, dict(belief_return_pct=0),
                          check_html=False)
-        yield Submission(InvestorDecision, dict(send_amount=10),
+        yield Submission(InvestorDecision, dict(send_amount=send),
                          check_html=False)
     else:
         yield SubmissionMustFail(BeliefElicit, {}, check_html=False)
         yield Submission(BeliefElicit, dict(belief_investor_send=5),
                          check_html=False)
     if bot.player.role == C.TRUSTEE_ROLE:
-        # 投资者送出 10 → 动态上限 30，恰好等于字段静态 max=30，
-        # 故 max_return + 1 = 31 由字段级校验拦下；若将来放宽静态上限，
-        # TrusteeDecision.error_message 的动态上限仍会拦截。两条防线
-        # 任一生效都会让 must_fail 通过，这正是规格第 8 节要求的双重约束。
         max_return = C.MULTIPLIER * bot.player.group.investor.send_amount
-        yield SubmissionMustFail(
-            TrusteeDecision, dict(return_amount=max_return + 1),
-            check_html=False
-        )
-        yield Submission(TrusteeDecision, dict(return_amount=15),
-                         check_html=False)
+        if max_return > 0:
+            # 走到这里即 x = 10 → 动态上限 30，恰好等于字段静态 max=30，
+            # 故 max_return + 1 = 31 由字段级校验拦下；若将来放宽静态上限，
+            # TrusteeDecision.error_message 的动态上限仍会拦截。两条防线
+            # 任一生效都会让 must_fail 通过，这正是规格第 8 节要求的双重约束。
+            yield SubmissionMustFail(
+                TrusteeDecision, dict(return_amount=max_return + 1),
+                check_html=False
+            )
+            yield Submission(TrusteeDecision, dict(return_amount=15),
+                             check_html=False)
+        else:
+            # x = 0：本页不渲染任何表单（get_form_fields 返回 []），
+            # must_fail 在无表单页面上必然抛极具误导性的
+            # BotError: passed validation anyway，故必须跳过 must-fail。
+            yield TrusteeDecision
     yield Results
 
 
@@ -165,6 +179,22 @@ def check_round(bot, zero_send=False):
     expect(MessageSend.is_displayed(player), is_comm)
     expect(MessageReveal.is_displayed(player), is_comm)
 
+    # ---------- C1：MessageReveal 必须展示「对方」的消息 ----------
+    # vars_for_template 里的「我的角色 → 从对方行读哪个字段」映射若被写反，
+    # 页面会渲染出错误的消息，而此前没有任何断言会失败。这里把页面**将要
+    # 显示**的文本与对方**实际提交**的消息逐字比对，使映射方向可证伪：
+    # 投资者必须看到受托人的 message_trustee，受托人必须看到投资者的
+    # message_investor。两侧文案分属不同量表（互无交集），故读错字段、
+    # 写反分支、乃至误读自己那一行，都会被这一条拦下。
+    if is_comm:
+        other = player.get_others_in_group()[0]
+        other_message_field = (
+            'message_trustee' if player.role == C.INVESTOR_ROLE
+            else 'message_investor'
+        )
+        expect(MessageReveal.vars_for_template(player)['message_from_other'],
+               expect_populated(other, other_message_field))
+
     if player.role == C.INVESTOR_ROLE:
         # 对方的消息字段只由受托人分支写入，投资者必须为空
         expect(player.field_maybe_none('message_trustee'), None)
@@ -174,13 +204,24 @@ def check_round(bot, zero_send=False):
             expect(expect_populated(player, 'message_investor'),
                    C.INVESTOR_MESSAGES[0][1])
             expect(expect_populated(player, 'investor_message_strength'), 4)
-            expect(expect_populated(player, 'send_amount'), 10)
-            # 预测 0%，实际比例 15/(3*10) = 50%，偏差 50 个百分点 > 10 → 不得奖
+            expect(expect_populated(player, 'send_amount'),
+                   0 if zero_send else 10)
+            # 两种情形都报告预测 0%
             expect(player.belief_return_pct, 0)
-            expect(player.belief_bonus, 0)
-            expect(expect_populated(player, 'return_ratio'), 0.5)
-            # 收益 = (10 - 10 + 15) + 0 = 15
-            expect(expect_populated(player, 'payoff'), 15)
+            if zero_send:
+                # x = 0 → 一律不发奖金（规格第 7 节）。这是最有区分力的一格：
+                # 旧规则下预测 0% ≤ 10 个百分点会照发 2 点。
+                expect(player.belief_bonus, 0)
+                expect(expect_populated(player, 'return_ratio'), 0.0)
+                # 收益 = (10 - 0 + 0) + 0 = 10
+                expect(expect_populated(player, 'payoff'), 10)
+            else:
+                # 预测 0%，实际比例 15/(3*10) = 50%，偏差 50 个百分点 > 10
+                # → 不得奖（x > 0 的规则未变，此处防回归）
+                expect(player.belief_bonus, 0)
+                expect(expect_populated(player, 'return_ratio'), 0.5)
+                # 收益 = (10 - 10 + 15) + 0 = 15
+                expect(expect_populated(player, 'payoff'), 15)
         else:
             # MessageSend 未展示：消息字段必须全程为 NULL
             expect(player.field_maybe_none('message_investor'), None)
@@ -188,12 +229,14 @@ def check_round(bot, zero_send=False):
             expect(expect_populated(player, 'send_amount'),
                    0 if zero_send else 5)
             if zero_send:
-                # x = 0 → 实际比例约定为 0%，预测 0..10 得奖 2 点
+                # x = 0 → 一律不发奖金（规格第 7 节）：return_ratio 的 0.0
+                # 约定只是比例的定义，不再推导出奖金。预测 0% 落在旧规则的
+                # 容差内，故这一格能真实区分新旧规则。
                 expect(player.belief_return_pct, 0)
-                expect(player.belief_bonus, 2)
+                expect(player.belief_bonus, 0)
                 expect(expect_populated(player, 'return_ratio'), 0.0)
-                # 收益 = (10 - 0 + 0) + 2 = 12
-                expect(expect_populated(player, 'payoff'), 12)
+                # 收益 = (10 - 0 + 0) + 0 = 10（恰好等于禀赋，不再高于禀赋）
+                expect(expect_populated(player, 'payoff'), 10)
             else:
                 # 预测 50%，实际比例 6/(3*5) = 40%，偏差恰好 10 个百分点
                 # （边界内含等号）→ 得奖 2 点
@@ -223,11 +266,18 @@ def check_round(bot, zero_send=False):
         send_amount = expect_populated(player.group.investor, 'send_amount')
         return_amount = expect_populated(player, 'return_amount')
         if is_comm:
-            expect(send_amount, 10)
-            expect(return_amount, 15)
-            expect(expect_populated(player, 'return_ratio'), 0.5)
-            # 收益 = 3*10 - 15 = 15
-            expect(expect_populated(player, 'payoff'), 15)
+            expect(send_amount, 0 if zero_send else 10)
+            if zero_send:
+                # x = 0：TrusteeDecision 无表单，before_next_page 补写 0
+                expect(return_amount, 0)
+                expect(expect_populated(player, 'return_ratio'), 0.0)
+                # 收益 = 3*0 - 0 = 0
+                expect(expect_populated(player, 'payoff'), 0)
+            else:
+                expect(return_amount, 15)
+                expect(expect_populated(player, 'return_ratio'), 0.5)
+                # 收益 = 3*10 - 15 = 15
+                expect(expect_populated(player, 'payoff'), 15)
         elif zero_send:
             # x = 0：本页无表单，before_next_page 补写 0
             expect(send_amount, 0)

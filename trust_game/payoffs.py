@@ -50,14 +50,21 @@ def belief_bonus(
     """信念奖金：预测返还比例与实际比例的偏差在 tolerance_pct 个百分点内则得奖。
 
     判定使用全整数运算：|belief*denom - 100*y| <= tolerance*denom，其中 denom = m*x。
-    这样正确性不依赖 IEEE 浮点舍入的推理。（等价浮点实现已在全部 17776 组
-    (x,y,belief) 输入上穷举验证同样正确；此处选择整数实现是为了让正确性
+    这样正确性不依赖 IEEE 浮点舍入的推理。（等价浮点实现已在 x > 0 的全部
+    (x,y,belief) 组合上穷举验证同样正确；此处选择整数实现是为了让正确性
     由构造保证，而非由浮点行为保证——本函数决定真实金钱收益。）
 
-    x = 0 时实际比例约定为 0%，故预测 0..tolerance_pct 得奖。
+    x = 0 时不发奖金（规格第 7 节），与预测值无关：此时没有发生实际转移，
+    信念无对象可评分。return_ratio 的 0.0 约定只是「比例」这一派生量在
+    x=0 时的定义（B 无可返还金额，y 必为 0），并不蕴含「照发奖金」。
+    若照发，送出 0 且预测 <= tolerance_pct 的投资者将确定得到
+    10 + 2 = 12 点，高于 10 点禀赋——「什么都不送」于是成为唯一无风险
+    且优于禀赋的选项，会在 x=0 处形成下限聚集、使信任度量向下偏，并把
+    不信任、风险规避与惩罚三种动机混同（x=0 还把受托人收益打到 0，
+    对照组的 y=6 情形为 9）。故 x=0 一律返回 0。
     """
     if send_amount <= 0:
-        return bonus if belief_return_pct <= tolerance_pct else 0
+        return 0
     denom = MULTIPLIER * send_amount
     if abs(belief_return_pct * denom - 100 * return_amount) <= tolerance_pct * denom:
         return bonus

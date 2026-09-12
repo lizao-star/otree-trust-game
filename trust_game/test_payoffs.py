@@ -81,21 +81,29 @@ class TestPayoffs(unittest.TestCase):
         self.assertEqual(payoffs.belief_bonus(29, 5, 6), 0)
         self.assertEqual(payoffs.belief_bonus(51, 5, 6), 0)
 
-    def test_belief_bonus_when_x_is_zero(self):
-        # x=0 时实际比例约定为 0%，预测 0-10% 得奖
-        self.assertEqual(payoffs.belief_bonus(0, 0, 0), 2)
-        self.assertEqual(payoffs.belief_bonus(10, 0, 0), 2)
-        self.assertEqual(payoffs.belief_bonus(11, 0, 0), 0)
-        self.assertEqual(payoffs.belief_bonus(100, 0, 0), 0)
+    def test_belief_bonus_is_zero_when_x_is_zero(self):
+        """x=0 时没有实际转移，一律不发奖金（规格第 7 节）。
+
+        覆盖容差内（0、5、10）与容差外（11、50、100）两侧：旧规则在
+        预测 <= 10 时照发 2 点，会使「送出 0 且预测低」成为确定得到
+        12 点（高于 10 点禀赋）的无风险选项。
+        """
+        for belief in (0, 5, 10, 11, 50, 100):
+            with self.subTest(belief=belief):
+                self.assertEqual(payoffs.belief_bonus(belief, 0, 0), 0)
 
     def test_belief_bonus_matches_exact_rational_solution_exhaustively(self):
-        """穷举验证整数实现与精确有理数解完全一致。"""
+        """穷举验证整数实现与规定期望值完全一致。
+
+        x > 0 用精确有理数解；x = 0 的期望值是规格第 7 节的规定
+        （一律 0），而非有理数解——此时比例无对象可评分。
+        """
         from fractions import Fraction
         for x in range(11):
             for y in range(3 * x + 1):
                 for belief in range(101):
                     if x == 0:
-                        expected = 2 if belief <= 10 else 0
+                        expected = 0
                     else:
                         exact = Fraction(100 * y, 3 * x)
                         expected = 2 if abs(Fraction(belief) - exact) <= 10 else 0
