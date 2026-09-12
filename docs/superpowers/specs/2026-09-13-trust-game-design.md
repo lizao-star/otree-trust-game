@@ -205,7 +205,7 @@ oTree 的 `blank=True` 会使表单字段**非必填**，且 wtforms_sqlalchemy 
 
 | 字段名 | 类型 | 说明 |
 |---|---|---|
-| `risk_choice` | IntegerField(1–6) | 辉奖券选项，序数 |
+| `risk_choice` | IntegerField(0–5) | 风险规避指数：5 行菜单中选择「确定金额」的行数，数值越大越规避风险 |
 | `dictator_give` | IntegerField(0–10) | 独裁者博弈送出额 |
 | `general_trust` | IntegerField(0–10) | 一般信任量表 |
 | `gender` / `age` / `grade` / `major` | — | 人口学 |
@@ -230,7 +230,7 @@ oTree 6 的调用链为：`common.is_noself(app)` 判定 `__init__.py` 含 `"imp
 
 | # | 页面 | 内容 | 影响报酬 |
 |---|---|---|---|
-| 1 | `RiskPreference` | 简化辉奖券选择题，6 档递进（确定金额 vs 50/50 彩票） | 否 |
+| 1 | `RiskPreference` | 简化辉奖券选择题，**5 行**递进（每行在确定金额与同一 50/50 彩票间二选一，确定金额逐行递增 3→7 点，彩票固定为 50% 得 10 点、50% 得 0 点，彩票期望值恒为 5 点） | 否 |
 | 2 | `DictatorGame` | 独裁者博弈：10 点中送对方 s 点 | **是**，收益 = 10 − s |
 | 3 | `GeneralTrust` | 一般信任量表 0–10 | 否 |
 | 4 | `Demographics` | 性别/年龄/年级/专业/经济学课程/实验经历 | 否 |
