@@ -247,10 +247,14 @@ def belief_bonus(
     (x,y,belief) 输入上穷举验证同样正确；此处选择整数实现是为了让正确性
     由构造保证，而非由浮点行为保证——本函数决定真实金钱收益。）
 
-    x = 0 时实际比例约定为 0%，故预测 0..tolerance_pct 得奖。
+    x = 0 时不发放奖金：此时没有实际转移，信念无对象可评分。若照发，
+    「送出 0 且预测 ≤10%」将确定获得 10 + 2 = 12 点，高于 10 点禀赋，
+    使"什么都不送"成为唯一的无风险且优于禀赋的选项，在 x=0 处形成下限
+    聚集、使信任度量向下偏，并混同不信任、风险规避与惩罚三种动机。
+    详见规格第 7 节。
     """
     if send_amount <= 0:
-        return bonus if belief_return_pct <= tolerance_pct else 0
+        return 0
     denom = MULTIPLIER * send_amount
     if abs(belief_return_pct * denom - 100 * return_amount) <= tolerance_pct * denom:
         return bonus
@@ -343,12 +347,14 @@ class TestPayoffs(unittest.TestCase):
         self.assertEqual(payoffs.belief_bonus(29, 5, 6), 0)
         self.assertEqual(payoffs.belief_bonus(51, 5, 6), 0)
 
-    def test_belief_bonus_when_x_is_zero(self):
-        # x=0 时实际比例约定为 0%，预测 0-10% 得奖
-        self.assertEqual(payoffs.belief_bonus(0, 0, 0), 2)
-        self.assertEqual(payoffs.belief_bonus(10, 0, 0), 2)
-        self.assertEqual(payoffs.belief_bonus(11, 0, 0), 0)
-        self.assertEqual(payoffs.belief_bonus(100, 0, 0), 0)
+    def test_belief_bonus_is_zero_when_x_is_zero(self):
+        """x=0 时没有实际转移，不发奖金（规格第 7 节）。
+
+            照发会使「送出 0 且预测低」成为高于禀赋的无风险收益。
+        """
+        for belief in (0, 5, 10, 11, 50, 100):
+            with self.subTest(belief=belief):
+                self.assertEqual(payoffs.belief_bonus(belief, 0, 0), 0)
 
     def test_belief_bonus_matches_exact_rational_solution_exhaustively(self):
         """穷举验证整数实现与精确有理数解完全一致。"""
@@ -357,7 +363,7 @@ class TestPayoffs(unittest.TestCase):
             for y in range(3 * x + 1):
                 for belief in range(101):
                     if x == 0:
-                        expected = 2 if belief <= 10 else 0
+                        expected = 0
                     else:
                         exact = Fraction(100 * y, 3 * x)
                         expected = 2 if abs(Fraction(belief) - exact) <= 10 else 0
@@ -944,6 +950,12 @@ page_sequence = [
       <p>在做出决策之前，你与对方可以各自选择一条消息发送给对方，双方都能看到对方的消息。</p>
     {{ else }}
       <p>整个过程中你与对方完全匿名，不会有任何信息交流。</p>
+    {{ endif }}
+
+    {{ if is_investor }}
+      <p><strong>信念判断奖金：</strong>在你做出送出决策之前，你会被问及「你认为对方会返还你所送出金额放大后的百分之多少」。
+      若你的判断与实际结果相差不超过 10 个百分点，你将额外获得 <strong>2 点</strong>奖金；否则为 0 点。</p>
+      <p><strong>请注意：若你送出的点数为 0，则本项奖金为 0</strong>——此时没有发生实际转移，无法对你的判断进行评分。</p>
     {{ endif }}
 
     <p class="text-muted">每 1 点可兑换 1 元人民币，另有 20 元出场费。</p>
@@ -1838,9 +1850,10 @@ def generate():
                     0, 4))
             return_amt = int(round(ratio * max_return))
 
-            # --- 信念奖金（与 trust_game.payoffs 的规则一致）---
+            # --- 信念奖金（必须与 trust_game.payoffs.belief_bonus 的规则一致）---
+            # x=0 时不发放奖金（规格第 7 节）
             if send <= 0:
-                bonus = 2 if belief <= 10 else 0
+                bonus = 0
             else:
                 denom = MULTIPLIER * send
                 bonus = 2 if abs(belief * denom - 100 * return_amt) <= 10 * denom else 0
