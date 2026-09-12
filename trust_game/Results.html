@@ -1,0 +1,16 @@
+{{ block title }}
+    本轮结果
+{{ endblock }}
+
+{{ block content }}
+<ul class="list-group">
+  <li class="list-group-item">甲方送出的点数：{{ send_amount }}</li>
+  <li class="list-group-item">乙方返还的点数：{{ return_amount }}</li>
+  {{ if is_investor }}
+    <li class="list-group-item">你获得的信念判断奖金：{{ belief_bonus }} 点</li>
+  {{ endif }}
+  <li class="list-group-item active">你的本轮收益：{{ my_payoff }}</li>
+</ul>
+
+{{ next_button }}
+{{ endblock }}

@@ -1,0 +1,35 @@
+{{ block title }}
+    实验说明
+{{ endblock }}
+
+{{ block content }}
+<div class="card">
+  <div class="card-body">
+    <p>欢迎参加本实验。你将与另一位参与者随机配对，双方互不认识。</p>
+
+    {{ if is_investor }}
+      <h5>你的角色：投资者（甲方）</h5>
+      <p>你初始获得 <strong>{{ endowment }} 点</strong>。你需要决定从中送出多少点给乙方。</p>
+      <p>你送出的点数会被实验者<strong>乘以 {{ multiplier }}</strong> 后交给乙方。</p>
+      <p>随后乙方决定返还多少点给你。你的最终收益为：</p>
+      <p class="text-center"><strong>{{ endowment }} − 你送出的点数 + 乙方返还的点数</strong></p>
+    {{ else }}
+      <h5>你的角色：受托人（乙方）</h5>
+      <p>甲方初始获得 <strong>{{ endowment }} 点</strong>，并决定送出其中一部分给你。</p>
+      <p>甲方送出的点数会被实验者<strong>乘以 {{ multiplier }}</strong> 后交给你，因此你最多可获得 {{ max_return }} 点。</p>
+      <p>随后你决定返还多少点给甲方。你的最终收益为：</p>
+      <p class="text-center"><strong>你收到的点数 − 你返还给甲方的点数</strong></p>
+    {{ endif }}
+
+    {{ if is_communication }}
+      <p>在做出决策之前，你与对方可以各自选择一条消息发送给对方，双方都能看到对方的消息。</p>
+    {{ else }}
+      <p>整个过程中你与对方完全匿名，不会有任何信息交流。</p>
+    {{ endif }}
+
+    <p class="text-muted">每 1 点可兑换 1 元人民币，另有 20 元出场费。</p>
+  </div>
+</div>
+
+{{ next_button }}
+{{ endblock }}

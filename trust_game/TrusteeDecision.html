@@ -1,0 +1,18 @@
+{{ block title }}
+    你的决策
+{{ endblock }}
+
+{{ block content }}
+<p>甲方送出了 <strong>{{ send_amount }} 点</strong>。</p>
+
+{{ if max_return == 0 }}
+  <p>经过乘以 {{ C.MULTIPLIER }} 后，你收到 <strong>0 点</strong>，因此没有可返还的金额。</p>
+  <p class="text-danger">你的本轮收益为 0 点。</p>
+{{ else }}
+  <p>经过乘以 {{ C.MULTIPLIER }} 后，你收到 <strong>{{ max_return }} 点</strong>。</p>
+  <p>请决定返还多少点给甲方（0 到 {{ max_return }} 之间）：</p>
+  {{ formfields }}
+{{ endif }}
+
+{{ next_button }}
+{{ endblock }}

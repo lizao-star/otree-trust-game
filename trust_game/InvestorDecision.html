@@ -1,0 +1,10 @@
+{{ block title }}
+    你的决策
+{{ endblock }}
+
+{{ block content }}
+<p>你初始获得 {{ C.ENDOWMENT }} 点。请决定送出多少点给乙方。</p>
+<p>送出多少点，就会被乘以 {{ C.MULTIPLIER }} 后交给乙方。</p>
+{{ formfields }}
+{{ next_button }}
+{{ endblock }}
