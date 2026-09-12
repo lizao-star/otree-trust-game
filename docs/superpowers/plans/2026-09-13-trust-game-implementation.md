@@ -17,6 +17,17 @@
   - **不要**试图用 symlink 把 `db.sqlite3` 指向 `/tmp` 来绕过——这会破坏 `otree test` 的版本校验（已实测被拒）。
   - 空文件 `db.sqlite3` 会在任何 app 导入时被重新创建（oTree 导入期无条件连接），属正常现象，已在 `.gitignore` 中忽略。
 - **`otree test` 依赖 `requests`**：缺失时它打印提示后**静默退出且退出码为 0**，极易被误判为测试通过。Task 1 Step 2 必须先安装。
+
+### ⚠️ oTree 6 Bot 测试的四个 API 事实（Task 2 实测确认，写测试代码前必读）
+
+这四条是 Task 2 实现时踩实的，**本计划早期版本在四处都写错了**，会导致测试静默假通过。后续任务一律以此为准。
+
+1. **`otree test` 的参数是 session config 名，不是 app 名**。CLI 定义见 `otree/cli/bots.py`：`parser.add_argument('session_config_name', ...)`，省略则运行全部 config。所以 `otree test <app名>`（例如 `otree test trust_game`）会报 `No session config with name '<app名>'`；正确写法是 `otree test trust_baseline` / `otree test trust_communication`。**注意本计划早期版本把此处写成 app 名，已全面改正。**
+2. **oTree 6 的 `PlayerBot` 没有 `validate_round` 钩子**（全包搜索 `validate_round` 零结果；`api.pyi` 在 `Bot` 上只暴露 `play_round`）。把断言写在 `validate_round` 里等于**死代码**，测试会通过但什么都没验证。断言必须写在 `play_round` 内、最后一个 `yield` 之后。
+3. **普通页面必须由 bot 显式 yield，只有 WaitPage 被框架自动处理**。因此 `play_round` 的第一句必须是 `yield Introduction`，否则 bot 停在首页就提交下一页的表单，直接失败。
+4. **`expect(player.some_field, None)` 会抛 `NullFieldError`**（`otree/database.py:639`；oTree 6 对未赋值的字段访问即抛错）。判断"未设置"要用官方接口 `player.field_maybe_none('field_name')`。
+
+**验证断言真的在跑（防止死代码假通过）**：改断言前先用变异探针确认它会被触发——故意把某个断言改错，运行测试必须看到 `ExpectError` 且退出码非 0；确认后再改回。
 - **oTree 版本**：6.0.15。角色必须定义为 `Constants` 中的字符串常量（`INVESTOR_ROLE = 'Investor'`），读取时用 `player.role` **属性**，不可写成 `player.role()`。
 - **角色分配顺序**：`get_roles()` 按 `Constants.__dict__` 的插入序取值。`INVESTOR_ROLE` 必须在 `TRUSTEE_ROLE` 之前定义，以保证 `id_in_group=1` 是投资者。
 - **开发服务器命令**：`otree devserver`（不是 `runserver`）。
@@ -489,6 +500,12 @@ Expected: 测试 OK；四个文件均存在。
 ---
 
 ## Task 2: trust_game 模型层 + 基线组完整流程
+
+> **⚠️ 本节代码块是计划原始记录，其中测试部分已作废。**
+> 实现时依据实测的 oTree 6 API 做了四处修正（详见 Global Constraints 的「oTree 6 Bot 测试的四个 API 事实」）：
+> `otree test` 参数应为 session config 名、`validate_round` 钩子不存在（断言须移入 `play_round`）、
+> 首页需显式 `yield Introduction`、字段判空须用 `field_maybe_none()`。
+> **权威版本是仓库中的 `trust_game/tests.py`**，Task 3 应在它基础上扩展。
 
 **Files:**
 - Create: `trust_game/__init__.py`（覆盖占位）
@@ -1046,17 +1063,20 @@ class PlayerBot(Bot):
 ```bash
 cd /share/zrs2022150501010/project/behavioral_experiment
 rm -f db.sqlite3
-/share/zrs2022150501010/miniconda3/envs/otree/bin/otree test trust_game
+/share/zrs2022150501010/miniconda3/envs/otree/bin/otree test trust_baseline
 ```
 
 Expected: `Bots completed session`，无 Traceback。
 
 - [ ] **Step 7: 验证收益计算与消息页跳过**
 
-在 `trust_game/tests.py` 的 `PlayerBot` 中追加 `validate_round`，验证结算结果正确、且基线组确实跳过了消息页：
+在 `trust_game/tests.py` 的 `PlayerBot` 中追加断言，验证结算结果正确、且基线组确实跳过了消息页。
+
+**⚠️ 本步骤的代码已在 Task 2 实现时修正——权威版本是仓库中实际的 `trust_game/tests.py`。** 下面给出的是修正后的写法（断言位于 `play_round` 末尾，字段判空用 `field_maybe_none`）：
 
 ```python
-    def validate_round(self):
+    def check_round(self):
+        # 断言直接写在 play_round 末尾调用；oTree 6 无 validate_round 钩子
         from trust_game import has_communication
         expect(has_communication(self.player), False)
 
@@ -1088,7 +1108,7 @@ Expected: `Bots completed session`，无 Traceback。
 ```bash
 cd /share/zrs2022150501010/project/behavioral_experiment
 rm -f db.sqlite3
-/share/zrs2022150501010/miniconda3/envs/otree/bin/otree test trust_game
+/share/zrs2022150501010/miniconda3/envs/otree/bin/otree test trust_baseline
 ```
 
 Expected: `Bots completed session`，断言全部通过。
@@ -1188,13 +1208,8 @@ class CommunicationBot(Bot):
                              check_html=False)
         yield Results
 
-    def validate_round(self):
-        if self.player.role == C.INVESTOR_ROLE:
-            expect(self.player.investor_message_strength, 4)
-            expect(self.player.send_amount, 10)
-        else:
-            expect(self.player.promise_strength, 3)
-            expect(self.player.return_amount, 15)
+    # 注意：不要在这里写 validate_round —— oTree 6 没有这个钩子，
+    # 写在那里的断言永远不会执行。断言统一由 Step 3 的 check_round() 承担。
 ```
 
 - [ ] **Step 3: 让 `PlayerBot` 按处理组分派**
@@ -1216,7 +1231,7 @@ class PlayerBot(Bot):
             yield from baseline_round(self)
 
 
-def baseline_round(bot):
+def baseline_round(bot, zero_send=False):
     yield Submission(ComprehensionCheck,
                      dict(comp_q1=10, comp_q2=12, comp_q3=12),
                      check_html=False)
@@ -1262,8 +1277,13 @@ def communication_round(bot):
 
 
 def check_round(bot):
-    """验证结算正确性与处理组隔离。命名为 check_round 以避免与
-    PlayerBot.validate_round 方法同名造成阅读混淆。"""
+    """验证结算正确性与处理组隔离。
+
+    在 play_round 末尾调用（oTree 6 无 validate_round 钩子）。
+
+    注意：判断"字段未设置"必须用 field_maybe_none()，直接访问未赋值的字段
+    会抛 NullFieldError（otree/database.py:639）。
+    """
     if bot.player.role == C.INVESTOR_ROLE:
         if bot.player.is_communication:
             # 投资者选了最强的消息（编码 4），送出 10 点
@@ -1274,7 +1294,7 @@ def check_round(bot):
             # 收益 = (10 - 10 + 15) + 0 = 15
             expect(bot.player.payoff, 15)
         else:
-            expect(bot.player.message_investor, None)
+            expect(bot.player.field_maybe_none('message_investor'), None)
             expect(bot.player.send_amount, 5)
     else:
         if bot.player.is_communication:
@@ -1283,28 +1303,33 @@ def check_round(bot):
             # 收益 = 3*10 - 15 = 15
             expect(bot.player.payoff, 15)
         else:
-            expect(bot.player.message_trustee, None)
+            expect(bot.player.field_maybe_none('message_trustee'), None)
 ```
 
 **数值推导（务必核对）：**
 - 沟通组投资者：送出 10，收到返还 15 → `A = 10 − 10 + 15 = 15`；信念预测 0% 而实际 50%，偏差 50 > 10 → 奖金 0 → 总计 `15`
 - 沟通组受托人：`B = 3×10 − 15 = 15`
 
-- [ ] **Step 4: 在 `PlayerBot` 中挂上 `validate_round`**
+- [ ] **Step 4: 在 `PlayerBot` 中挂上断言**
 
-oTree 会在每轮结束时调用 `PlayerBot.validate_round()`（若定义）。把上一步的模块级 `check_round(bot)` 接到类方法：
+oTree 6 **没有** `PlayerBot.validate_round` 钩子，把断言写在那里等于死代码——测试会通过但什么都没验证。断言必须写在 `play_round` 内、最后一个 `yield` 之后（生成器被驱动到结束后继续执行到函数末尾，断言因此在流程中真实运行）。
 
 ```python
 class PlayerBot(Bot):
+    cases = ['normal', 'zero_send']
+
     def play_round(self):
+        # 普通页面必须显式 yield，框架只自动处理 WaitPage
+        yield Introduction
+        zero_send = (self.case == 'zero_send')
         if self.player.is_communication:
             yield from communication_round(self)
         else:
-            yield from baseline_round(self)
-
-    def validate_round(self):
+            yield from baseline_round(self, zero_send=zero_send)
         check_round(self)
 ```
+
+**必做：用变异探针证明断言真的在跑。** 把 `check_round` 中任意一条断言故意改错（例如把 `expect(bot.player.send_amount, 5)` 改成 `999`），运行 `otree test trust_baseline`，**必须**看到 `ExpectError` 且退出码非 0。确认后再改回。Task 2 已用此法验证过断言是活的。
 
 - [ ] **Step 5: 恢复两个 session config**
 
@@ -1314,11 +1339,13 @@ class PlayerBot(Bot):
 
 ```bash
 cd /share/zrs2022150501010/project/behavioral_experiment
-rm -f db.sqlite3
-/share/zrs2022150501010/miniconda3/envs/otree/bin/otree test trust_game
+echo "--- 基线组 ---"
+/share/zrs2022150501010/miniconda3/envs/otree/bin/otree test trust_baseline 2>&1 | grep -E "Bots completed session|MessageSend|MessageReveal|Traceback|Error"
+echo "--- 沟通组 ---"
+/share/zrs2022150501010/miniconda3/envs/otree/bin/otree test trust_communication 2>&1 | grep -E "Bots completed session|MessageSend|MessageReveal|Traceback|Error"
 ```
 
-Expected: 两个 session config 各打印一次 `Bots completed session`；沟通组流程中出现 `Submit .../MessageSend/` 与 `.../MessageReveal/`，基线组流程中**不出现**这两个页面的提交记录。
+Expected: 两条各打印一次 `Bots completed session`；**沟通组**流程中出现 `Submit .../MessageSend/` 与 `.../MessageReveal/`；**基线组**流程中这两类提交**完全不出现**。任何 `Traceback` 都表示失败。
 
 - [ ] **Step 7: 验证边界情形 x=0**
 
@@ -1364,7 +1391,7 @@ def baseline_round(bot, zero_send=False):
 ```bash
 cd /share/zrs2022150501010/project/behavioral_experiment
 rm -f db.sqlite3
-/share/zrs2022150501010/miniconda3/envs/otree/bin/otree test trust_game
+/share/zrs2022150501010/miniconda3/envs/otree/bin/otree test trust_baseline
 ```
 
 Expected: 全部通过。x=0 情形下受托人 `return_amount` 为 0，其 `payoff` 为 0。
@@ -1391,7 +1418,7 @@ Expected: 全部通过。x=0 情形下受托人 `return_amount` 为 0，其 `pay
 ```bash
 cd /share/zrs2022150501010/project/behavioral_experiment
 rm -f db.sqlite3
-/share/zrs2022150501010/miniconda3/envs/otree/bin/otree test trust_game
+/share/zrs2022150501010/miniconda3/envs/otree/bin/otree test trust_baseline
 ```
 
 Expected: 输出中出现 `SubmissionMustFail` 且测试通过（若越界提交未被拒，oTree 会抛错）。
@@ -1606,6 +1633,9 @@ from . import *
 
 class PlayerBot(Bot):
     def play_round(self):
+        # survey 的第 1 页 RiskPreference 本身有表单，故首个 yield 直接提交它，
+        # 不需要额外的裸页面 yield（对比 trust_game：其首页 Introduction 无表单，
+        # 必须先 yield Introduction 才能推进）。
         yield Submission(RiskPreference, dict(
             risk_row1=1, risk_row2=1, risk_row3=0, risk_row4=0, risk_row5=0,
         ), check_html=False)
@@ -1616,31 +1646,33 @@ class PlayerBot(Bot):
             econ_courses=3, prior_experience=False,
         ), check_html=False)
 
-    def validate_round(self):
+        # 断言写在 play_round 末尾（oTree 6 无 validate_round 钩子）
         expect(self.player.risk_choice, 2)
         expect(self.player.payoff, 6)   # 10 - 4
 ```
 
 - [ ] **Step 4: 运行 survey 的测试**
 
-```bash
-cd /share/zrs2022150501010/project/behavioral_experiment
-rm -f db.sqlite3
-/share/zrs2022150501010/miniconda3/envs/otree/bin/otree test survey
-```
-
-Expected: `Bots completed session`，`risk_choice == 2`、`payoff == 6` 断言通过。
-
-- [ ] **Step 5: 运行全项目测试**
+`survey` 不是 session config 名，不能直接 `otree test survey`。两个 config 的 `app_sequence` 都是 `['trust_game', 'survey']`，所以跑 `trust_baseline` 会连 survey 一起跑完：
 
 ```bash
 cd /share/zrs2022150501010/project/behavioral_experiment
-rm -f db.sqlite3
-/share/zrs2022150501010/miniconda3/envs/otree/bin/otree test trust_game
-/share/zrs2022150501010/miniconda3/envs/otree/bin/otree test survey
+/share/zrs2022150501010/miniconda3/envs/otree/bin/otree test trust_baseline 2>&1 | tail -20
 ```
 
-Expected: 两个 app 均通过。此时完整 session（trust_game → survey）的两个处理组都能端到端跑通。
+Expected: `Bots completed session`，survey 的 `risk_choice == 2`、`payoff == 6` 断言通过。
+
+- [ ] **Step 5: 运行全项目测试（两个处理组）**
+
+```bash
+cd /share/zrs2022150501010/project/behavioral_experiment
+echo "--- 基线组 ---"
+/share/zrs2022150501010/miniconda3/envs/otree/bin/otree test trust_baseline 2>&1 | grep -cE "Bots completed session"
+echo "--- 沟通组 ---"
+/share/zrs2022150501010/miniconda3/envs/otree/bin/otree test trust_communication 2>&1 | grep -cE "Bots completed session"
+```
+
+Expected: 两条各输出 `1`。此时完整 session（trust_game → survey）在两个处理组下都能端到端跑通。
 
 - [ ] **Step 6: 检查点**
 
@@ -2295,7 +2327,7 @@ Expected: 章节数 ≥ 11；"模拟数据" 出现 ≥ 6 次；无占位符；�
 2. **环境要求** — conda 环境 `otree`（Python 3.11.16，oTree 6.0.15）、依赖安装命令
 3. **目录结构** — 文件树与各目录职责
 4. **运行实验** — `otree devserver` 启动、浏览器访问 `http://localhost:8000`、用 admin 账号创建 session、两个 config 的说明
-5. **运行测试** — `otree test trust_game`、`otree test survey`、纯函数单元测试命令
+5. **运行测试** — `otree test trust_baseline`、`otree test trust_communication`（参数是 **session config 名**，不是 app 名）、以及纯函数单元测试命令
 6. **导出数据** — admin 界面 Data → Export，或 `otree zip`；说明 CSV 中 `is_communication` 字段即处理组标识
 7. **运行分析** — 模拟数据生成、分析脚本、真实数据替换方法（`--data` 参数）
 8. **交付物清单** — 实验报告路径、代码路径、规格与计划路径
@@ -2329,13 +2361,13 @@ cd /share/zrs2022150501010/project/behavioral_experiment
 rm -f db.sqlite3
 echo "=== 纯函数单元测试 ==="
 /share/zrs2022150501010/miniconda3/envs/otree/bin/python -m unittest trust_game.test_payoffs trust_game.test_content 2>&1 | tail -3
-echo "=== trust_game 两个处理组的 bot 测试 ==="
-/share/zrs2022150501010/miniconda3/envs/otree/bin/otree test trust_game 2>&1 | grep -cE "Bots completed session"
-echo "=== survey bot 测试 ==="
-/share/zrs2022150501010/miniconda3/envs/otree/bin/otree test survey 2>&1 | grep -cE "Bots completed session"
+echo "=== 基线组 session（含 trust_game + survey）==="
+/share/zrs2022150501010/miniconda3/envs/otree/bin/otree test trust_baseline 2>&1 | grep -cE "Bots completed session"
+echo "=== 沟通组 session（含 trust_game + survey）==="
+/share/zrs2022150501010/miniconda3/envs/otree/bin/otree test trust_communication 2>&1 | grep -cE "Bots completed session"
 ```
 
-Expected: 单元测试 `OK`；trust_game 出现 **2** 次 `Bots completed session`（两个 config）；survey 出现 **1** 次。
+Expected: 单元测试 `OK`；两条各输出 **1**（每个 config 各完成一次完整 session，覆盖 trust_game 与 survey 两个 app）。
 
 - [ ] **Step 4: 端到端验收——分析管线**
 
