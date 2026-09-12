@@ -135,6 +135,12 @@ class Introduction(Page):
             endowment=C.ENDOWMENT,
             multiplier=C.MULTIPLIER,
             max_return=C.MULTIPLIER * C.ENDOWMENT,
+            # 奖金规则的两个数字取自 payoffs 这唯一真值来源，供指导语文案渲染。
+            # 面向被试的文案若与规则脱钩，被试读到的就是错的规则——而「规则
+            # 未披露」正是本任务修复的缺陷，故此处不留硬编码字面量；
+            # trust_game/test_content.py 会断言渲染结果与这两个常量一致。
+            belief_tolerance_pct=payoffs.BELIEF_TOLERANCE_PCT,
+            belief_bonus_points=payoffs.BELIEF_BONUS_POINTS,
         )
 
 
