@@ -1802,17 +1802,31 @@ Expected: `4`。
 """
 
 import os
+import sys
 
 import numpy as np
 import pandas as pd
+
+# 把项目根加入 sys.path，以便导入 trust_game.payoffs。
+# 直接运行 `python analysis/simulate_data.py` 时 sys.path[0] 是 analysis/ 而非
+# 项目根，故必须显式补上。
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+from trust_game import payoffs  # noqa: E402
+
+# ⚠️ 收益与奖金规则一律取自 trust_game.payoffs，绝不在本文件重写副本。
+# 本项目已多次因「两处真值源」产生静默偏离：奖金规则刚经历过一次变更
+# （x=0 不再发放），若此处维护自己的副本，模拟数据会与真实机制悄悄脱节，
+# 而所有测试仍会通过。
+ENDOWMENT = payoffs.ENDOWMENT
+MULTIPLIER = payoffs.MULTIPLIER
 
 SEED = 20260913
 N_PER_CONDITION = 60          # 规格第 15.1 节：N=120，每组 60
 OUTPUT_PATH = os.path.join(os.path.dirname(__file__), 'output',
                            'simulated_data.csv')
-
-ENDOWMENT = 10
-MULTIPLIER = 3
 
 
 def _truncated_normal(rng, mean, sd, low, high):
@@ -1850,13 +1864,8 @@ def generate():
                     0, 4))
             return_amt = int(round(ratio * max_return))
 
-            # --- 信念奖金（必须与 trust_game.payoffs.belief_bonus 的规则一致）---
-            # x=0 时不发放奖金（规格第 7 节）
-            if send <= 0:
-                bonus = 0
-            else:
-                denom = MULTIPLIER * send
-                bonus = 2 if abs(belief * denom - 100 * return_amt) <= 10 * denom else 0
+            # 信念奖金：直接调用真值来源，不在此重写规则
+            bonus = payoffs.belief_bonus(belief, send, return_amt)
 
             code_i = f'sim_{is_comm}_{pair_id}_A'
             code_t = f'sim_{is_comm}_{pair_id}_B'
