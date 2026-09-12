@@ -5,5 +5,9 @@ db.sqlite3
 # 会以此名残留，且在其他客户端的句柄关闭前无法删除（rm 报 Device busy）
 .nfs*
 .superpowers/
-analysis/output/
+# analysis/output/ 是生成物目录（模拟数据、分析表格与图表），不入库。
+# 注意必须排除目录「内容」而非目录本身：排除目录后 git 无法再包含其中的
+# 任何文件，`!analysis/output/.gitkeep` 会静默失效（此前正是如此，
+# .gitkeep 从未被跟踪，checkout 后 output/ 目录不会被创建）。
+analysis/output/*
 !analysis/output/.gitkeep
