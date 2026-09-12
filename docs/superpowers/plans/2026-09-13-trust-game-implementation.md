@@ -11,6 +11,12 @@
 ## Global Constraints
 
 - **解释器路径固定**：所有 python 命令使用 `/share/zrs2022150501010/miniconda3/envs/otree/bin/python`，oTree 命令使用 `/share/zrs2022150501010/miniconda3/envs/otree/bin/otree`。不要用 `python3`。
+- **⚠️ 文件系统限制（Task 1 实测确认，影响全部任务）**：项目位于 NFS 挂载（`170.254.70.14:/gpu` on `/share`，`vers=3, local_lock=none`），该挂载上**任何 sqlite 写入都失败**（`disk I/O error`；已在 `/tmp` 对照验证，`/tmp` 正常）。
+  - `otree test` 与 `otree devserver` **不受影响**——oTree 在 `otree/main.py:107` 对 `bots` 与 `devserver_inner` 强制设置 `OTREE_IN_MEMORY=1`，数据库在内存中。
+  - `otree resetdb` **必须**加前缀：`OTREE_IN_MEMORY=1 otree resetdb --noinput`。
+  - **不要**试图用 symlink 把 `db.sqlite3` 指向 `/tmp` 来绕过——这会破坏 `otree test` 的版本校验（已实测被拒）。
+  - 空文件 `db.sqlite3` 会在任何 app 导入时被重新创建（oTree 导入期无条件连接），属正常现象，已在 `.gitignore` 中忽略。
+- **`otree test` 依赖 `requests`**：缺失时它打印提示后**静默退出且退出码为 0**，极易被误判为测试通过。Task 1 Step 2 必须先安装。
 - **oTree 版本**：6.0.15。角色必须定义为 `Constants` 中的字符串常量（`INVESTOR_ROLE = 'Investor'`），读取时用 `player.role` **属性**，不可写成 `player.role()`。
 - **角色分配顺序**：`get_roles()` 按 `Constants.__dict__` 的插入序取值。`INVESTOR_ROLE` 必须在 `TRUSTEE_ROLE` 之前定义，以保证 `id_in_group=1` 是投资者。
 - **开发服务器命令**：`otree devserver`（不是 `runserver`）。
@@ -410,7 +416,7 @@ cd /share/zrs2022150501010/project/behavioral_experiment
 /share/zrs2022150501010/miniconda3/envs/otree/bin/python -m unittest trust_game.test_payoffs trust_game.test_content -v
 ```
 
-Expected: 全部 `ok`，最后打印 `OK`，共 18 个测试。
+Expected: 全部 `ok`，最后打印 `OK`，共 **20** 个测试（`payoffs` 13 个 + `content` 7 个）。
 
 - [ ] **Step 9: 写 `settings.py`**
 
@@ -465,10 +471,10 @@ ROOMS = []
 
 ```bash
 cd /share/zrs2022150501010/project/behavioral_experiment
-/share/zrs2022150501010/miniconda3/envs/otree/bin/otree resetdb --noinput
+OTREE_IN_MEMORY=1 /share/zrs2022150501010/miniconda3/envs/otree/bin/otree resetdb --noinput
 ```
 
-Expected: 无报错，生成 `db.sqlite3`。
+Expected: 无报错。（必须加 `OTREE_IN_MEMORY=1` 前缀——见 Global Constraints 的 NFS 限制说明。）
 
 - [ ] **Step 11: 检查点（无 git，改为记录验证结果）**
 
@@ -2297,14 +2303,24 @@ Expected: 章节数 ≥ 11；"模拟数据" 出现 ≥ 6 次；无占位符；�
 
 - [ ] **Step 2: 端到端验收——启动服务器**
 
+后台启动开发服务器，用 HTTP 请求实际探测，而不是只读日志（原写法用 `|| true` 掩盖退出码，无法真正失败）：
+
 ```bash
 cd /share/zrs2022150501010/project/behavioral_experiment
-rm -f db.sqlite3
-/share/zrs2022150501010/miniconda3/envs/otree/bin/otree resetdb --noinput
-timeout 15 /share/zrs2022150501010/miniconda3/envs/otree/bin/otree devserver 8000 2>&1 | head -20 || true
+/share/zrs2022150501010/miniconda3/envs/otree/bin/otree devserver 8000 > /tmp/devserver_task8.log 2>&1 &
+DEV_PID=$!
+sleep 8
+echo "--- /demo 探测 ---"
+curl -s -o /dev/null -w "HTTP %{http_code}\n" http://localhost:8000/demo
+echo "--- 日志中的 Traceback ---"
+grep -c "Traceback" /tmp/devserver_task8.log || true
+kill $DEV_PID 2>/dev/null || true
+wait $DEV_PID 2>/dev/null || true
 ```
 
-Expected: 出现 `Starting development server at http://localhost:8000/` 或同类启动信息，无 Traceback。
+Expected: `/demo` 返回 `HTTP 200`；`grep -c Traceback` 输出 `0`。若 HTTP 码不是 200 或出现 Traceback，本步骤**失败**。
+
+注意：`otree devserver` 会通过 PATH 重新 exec 裸 `otree` 命令，故需确保 `PATH` 含 `/share/zrs2022150501010/miniconda3/envs/otree/bin`。
 
 - [ ] **Step 3: 端到端验收——完整测试套件**
 
