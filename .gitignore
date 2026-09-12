@@ -1,6 +1,9 @@
 __pycache__/
 *.pyc
 db.sqlite3
+# NFS silly-rename 工件：项目位于 NFS 挂载上，被删除时仍被打开的文件
+# 会以此名残留，且在其他客户端的句柄关闭前无法删除（rm 报 Device busy）
+.nfs*
 .superpowers/
 analysis/output/
 !analysis/output/.gitkeep
