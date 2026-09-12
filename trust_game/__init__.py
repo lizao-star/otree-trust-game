@@ -156,6 +156,20 @@ class MessageSend(Page):
         return ['message_trustee']
 
     @staticmethod
+    def error_message(player, values):
+        # 消息字段是 blank=True（基线组不经过本页，字段合法为空），oTree 因此
+        # 不会加 InputRequired；而未选中的单选组根本不会提交该键，values 里
+        # 连 key 都没有。所以必须在这里按角色显式拒绝空选择，并给出中文提示，
+        # 否则 before_next_page 读取空字段会抛 NullFieldError（HTTP 500）。
+        field = (
+            'message_investor'
+            if player.role == C.INVESTOR_ROLE
+            else 'message_trustee'
+        )
+        if not values.get(field):
+            return {field: '请选择一条要发送的消息。'}
+
+    @staticmethod
     def before_next_page(player, timeout_happened):
         if player.role == C.INVESTOR_ROLE:
             player.investor_message_strength = content.strength_of(
