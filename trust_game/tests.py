@@ -19,21 +19,28 @@ class PlayerBot(Bot):
             yield Submission(InvestorDecision, dict(send_amount=5),
                              check_html=False)
         else:
+            # 空信念提交同样必须被拒（belief_investor_send 是 blank=True），
+            # 否则受托人的信念观测被静默丢弃
+            yield SubmissionMustFail(BeliefElicit, {}, check_html=False)
             yield Submission(BeliefElicit, dict(belief_investor_send=5),
                              check_html=False)
         if self.player.role == C.TRUSTEE_ROLE:
+            # 空提交必须被拒（return_amount 是 blank=True，wtforms 会静默放过 None）
+            yield SubmissionMustFail(TrusteeDecision, {}, check_html=False)
             yield Submission(TrusteeDecision, dict(return_amount=6),
                              check_html=False)
         yield Results
 
-        # oTree 6 的 PlayerBot 只有 play_round 一个钩子，没有 validate_round
-        # （该名称在 oTree 6.0.15 中不存在）。因此断言必须在这里显式调用，
-        # 写在生成器里才会真正执行；否则等于死代码，测试会假通过。
+        # oTree 6 的 PlayerBot 只有 play_round 一个钩子，没有任何
+        # 形如 validate_round 的框架回调（该名称在 oTree 6.0.15 中不存在）。
+        # 因此断言必须在这里显式调用，写在生成器里才会真正执行；
+        # 否则等于死代码，测试会假通过。故意用 check_round 而非
+        # validate_round 命名：后者容易让人误以为是框架钩子而删掉此调用点。
         # 生成器在最后一次 yield 之后仍会被 runner 继续推进直到 StopIteration，
         # 此时 ResultsWaitPage 已完成结算，可以安全读取最终字段值。
-        self.validate_round()
+        self.check_round()
 
-    def validate_round(self):
+    def check_round(self):
         from trust_game import has_communication
         expect(has_communication(self.player), False)
 

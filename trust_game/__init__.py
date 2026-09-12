@@ -229,6 +229,15 @@ class BeliefElicit(Page):
             return ['belief_return_pct']
         return ['belief_investor_send']
 
+    @staticmethod
+    def error_message(player, values):
+        # 受托人分支的 belief_investor_send 是 blank=True，空提交会被
+        # wtforms 的 Optional() 静默放过（同 TrusteeDecision.return_amount
+        # 的机制）。这里没有下游崩溃，但该字段是分析计划依赖的研究变量，
+        # 静默缺失等于丢掉观测值，故按角色显式拒绝并给出中文提示。
+        if player.role == C.TRUSTEE_ROLE and values.get('belief_investor_send') is None:
+            return {'belief_investor_send': '请填写你认为对方会送出的点数（0-10）。'}
+
 
 class InvestorDecision(Page):
     form_model = 'player'
@@ -271,9 +280,21 @@ class TrusteeDecision(Page):
     @staticmethod
     def error_message(player, values):
         limit = TrusteeDecision.max_return(player)
-        amount = values.get('return_amount')
-        if amount is None:
+        # x = 0 时本页不渲染表单，oTree 会以空 values 直接调用本函数
+        # （otree/views/abstract.py:743-760）。此时必须返回假值，否则页面
+        # 无法通过。下面针对空提交的拒绝逻辑只在有表单时才生效。
+        if limit == 0:
             return
+        amount = values.get('return_amount')
+        # return_amount 是 blank=True：oTree 因此不加 InputRequired
+        # （otree/forms/forms.py），wtforms_sqlalchemy 又为可空列补了
+        # Optional()，而 Optional 会抹掉空输入的校验错误（wtforms
+        # validators.py），所以空提交会以 None 静默通过校验。
+        # 若不在此显式拒绝，该 NULL 会在结算阶段被读取
+        # （ResultsWaitPage.after_all_players_arrive 中 y = trustee.return_amount）
+        # 而抛 TypeError（HTTP 500），同组两人卡在等待页且都拿不到收益。
+        if amount is None:
+            return {'return_amount': '请填写返还金额（可以填 0）。'}
         if amount < 0 or amount > limit:
             return {'return_amount': f'返还金额必须在 0 到 {limit} 之间。'}
 
