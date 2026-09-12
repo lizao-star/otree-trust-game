@@ -1422,6 +1422,10 @@ Expected: 两条各打印一次 `Bots completed session`；**沟通组**流程�
 
 - [ ] **Step 7: 验证边界情形 x=0**
 
+> **⚠️ 与已加入的空提交 must-fail 用例冲突（Task 2 修复阶段实测发现）**
+> `TrusteeDecision` 现在已有一条 `SubmissionMustFail(TrusteeDecision, {}, ...)` 空提交用例。**当 x=0 时该页不渲染任何表单**，而 `must_fail` 在无表单页面上必然抛错（期望失败却"成功"翻页）。因此 `zero_send` 情形下**必须跳过**这条 must-fail 用例。实现时请把 must-fail 放在 `max_return > 0` 的分支内，或按 case 条件跳过。
+> 同样地，空提交用例本身也应在 `max_return > 0` 时才执行。
+
 在 `tests.py` 增加一个独立 bot 情形（用 `cases` 机制）：
 
 ```python
