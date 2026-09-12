@@ -50,6 +50,24 @@
 
 **这四条是必须项，不是建议。** 本项目已经为"不这么做"付出了三次返工代价。
 
+### ⚠️ `blank=True` 字段的判空规则（同类缺陷的根治）
+
+`blank=True` 会让 oTree **不追加 `InputRequired`**（`forms/forms.py:86-87`），而 wtforms_sqlalchemy 对可空列追加的 `Optional()` 会**擦除空输入的处理错误**（`wtforms/validators.py:163-168`）。结果是：空输入以 `None` 正常落库、表单不报错，直到某个下游读取点才抛 `NullFieldError`（HTTP 500）。
+
+本项目已两次因此产生 500：`MessageSend` 的消息字段（未勾选的 radio 不提交该 key）、`TrusteeDecision.return_amount`（**被测者清空数字输入框即可触发**，属普通操作而非边缘情况）。
+
+**规则：每个 `blank=True` 字段必须满足下列之一，否则不得进入数据收集：**
+
+| 字段 | 保障方式 |
+|---|---|
+| `message_investor` / `message_trustee` | 由 `MessageSend.error_message` 按角色拦截空值 |
+| `return_amount` | 由 `TrusteeDecision.error_message` 拦截（仅 `max_return > 0` 时；x=0 走无表单路径） |
+| `belief_investor_send` | 由 `BeliefElicit.error_message` 拦截（受托人分支） |
+| `investor_message_strength` / `promise_strength` | 基线组本就应为 NULL，**读取前必须用 `field_maybe_none()` 判空** |
+| `return_ratio` / `risk_choice` | 由各自 `before_next_page` 无条件写入 |
+
+**新增 `blank=True` 字段时的必做检查：** 找出它的每一个下游读取点，确认要么已被 `error_message` 保证非空，要么在读取处判空。**只加字段不检查读取点，就是下一次 500。**
+
 ### ⚠️ 第五个 API 事实：`creating_session` 必须是模块级函数
 
 Task 2 修复阶段实测发现。写成 `Subsession` 的实例方法时**永远不会被调用**：

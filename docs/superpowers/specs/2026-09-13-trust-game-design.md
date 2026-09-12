@@ -165,6 +165,19 @@ def has_communication(player):
 
 **注意：** 此时 B 的收益为 0（B 无独立禀赋），页面须明确告知，避免被试误以为获得正收益。
 
+### 8.4 可空字段的判空要求（实现阶段实测补充）
+
+oTree 的 `blank=True` 会使表单字段**非必填**，且 wtforms_sqlalchemy 对可空列追加的 `Optional()` 会擦除空输入的处理错误——空值以 `None` 正常落库、表单不报错，直到下游读取时才抛 `NullFieldError`（HTTP 500，被试卡死且该组收益无法结算）。
+
+实现阶段已两次触发该失效（`MessageSend` 的消息字段、`TrusteeDecision.return_amount`），后者在**清空数字输入框**这一普通操作下即可复现。
+
+**要求：每个可空字段必须满足其一——**
+
+1. 由本页 `error_message` 拦截空值并给出中文提示；或
+2. 在每一个下游读取点用 `field_maybe_none()` 判空。
+
+**并在 Bot 测试中以 `SubmissionMustFail(Page, {}, check_html=False)` 覆盖空提交路径。** 注意：边界值用例（如 x=0）**不能**替代空提交用例——二者路径不同，前者无法发现此类缺陷。
+
 ## 9. 数据模型
 
 ### 9.1 `trust_game` app — Player 字段
