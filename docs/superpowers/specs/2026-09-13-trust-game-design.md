@@ -197,7 +197,13 @@ def has_communication(player):
 
 ### 9.3 处理组标识（降范式存储）
 
-`session.config['communication']` 是处理组的**权威来源**，但**同时写入** `Player.is_communication` 字段（在 `Subsession.creating_session()` 中统一赋值）。
+`session.config['communication']` 是处理组的**权威来源**，但**同时写入** `Player.is_communication` 字段。
+
+**赋值方式（⚠️ oTree 6 实测约束，写错会导致字段恒为 NULL）：** 必须写成**模块级函数** `def creating_session(subsession):`，**不能**写成 `Subsession` 的实例方法。
+
+oTree 6 的调用链为：`common.is_noself(app)` 判定 `__init__.py` 含 `"import"` 时为真 → `Subsession.get_user_defined_target()` 返回**模块**而非类（`database.py:706-707`）→ `run_creating_session_functions` 执行 `getattr(模块, 'creating_session')`（`session.py:453`）。若定义在类上，`getattr` 返回 `None`，函数被静默跳过。oTree 6 自带模板即采用模块级写法（`assets/app_template_trials/__init__.py:33`）。
+
+**验证要求：** 该字段必须在测试中被断言为非 NULL，否则"字段恒为 NULL"这一失效模式无法被发现——而它会让依据该字段分派的 Bot 测试**静默地走错分支**。
 
 **理由：** 若处理组仅存在于 session 配置中，导出的 CSV 不自包含，分析脚本必须按 `session.code` 做脆弱的跨表关联，且 oTree 导出中 session 配置的序列化格式随版本变动。降范式存储使每份数据自带处理组标识，分析脚本与 Bot 测试都更稳健。
 

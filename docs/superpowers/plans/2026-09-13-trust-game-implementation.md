@@ -28,6 +28,31 @@
 4. **`expect(player.some_field, None)` 会抛 `NullFieldError`**（`otree/database.py:639`；oTree 6 对未赋值的字段访问即抛错）。判断"未设置"要用官方接口 `player.field_maybe_none('field_name')`。
 
 **验证断言真的在跑（防止死代码假通过）**：改断言前先用变异探针确认它会被触发——故意把某个断言改错，运行测试必须看到 `ExpectError` 且退出码非 0；确认后再改回。
+
+### ⚠️ 第五个 API 事实：`creating_session` 必须是模块级函数
+
+Task 2 修复阶段实测发现。写成 `Subsession` 的实例方法时**永远不会被调用**：
+
+```
+common.is_noself(app) 判定 __init__.py 含 "import" → True      (common.py:62)
+Subsession.get_user_defined_target() 返回「模块」而非「类」      (database.py:706-707)
+run_creating_session_functions: getattr(模块, 'creating_session')  (session.py:453)
+  → 定义在类上时返回 None → 静默跳过
+```
+
+正确写法（与 oTree 6 自带模板 `assets/app_template_trials/__init__.py:33` 一致）：
+
+```python
+def creating_session(subsession):
+    """必须定义在模块级，不能写成 Subsession 的实例方法。"""
+    is_comm = subsession.session.config.get('communication', False)
+    for player in subsession.get_players():
+        player.is_communication = is_comm
+```
+
+**失效后果（隐蔽且严重）**：`player.is_communication` 恒为 NULL → 导出数据缺处理组标识（违反规格 9.3）→ **任何依据该字段分派的测试都会静默走错分支**（例如沟通组的 bot 实际测的是基线路径），形成又一次假通过。
+
+**因此**：bot 测试必须显式断言 `player.is_communication is not None` 且与 `session.config['communication']` 一致，否则该失效模式不可见。
 - **oTree 版本**：6.0.15。角色必须定义为 `Constants` 中的字符串常量（`INVESTOR_ROLE = 'Investor'`），读取时用 `player.role` **属性**，不可写成 `player.role()`。
 - **角色分配顺序**：`get_roles()` 按 `Constants.__dict__` 的插入序取值。`INVESTOR_ROLE` 必须在 `TRUSTEE_ROLE` 之前定义，以保证 `id_in_group=1` 是投资者。
 - **开发服务器命令**：`otree devserver`（不是 `runserver`）。
@@ -568,11 +593,20 @@ def has_communication(player):
 
 
 class Subsession(BaseSubsession):
-    def creating_session(self):
-        """把处理组标识降范式写入每个 Player，使导出数据自包含。"""
-        is_comm = self.session.config.get('communication', False)
-        for player in self.get_players():
-            player.is_communication = is_comm
+    pass
+
+
+def creating_session(subsession):
+    """把处理组标识降范式写入每个 Player，使导出数据自包含。
+
+    ⚠️ 必须定义在模块级，不能写成 Subsession 的实例方法——oTree 6 会把
+    调用目标解析为模块（is_noself 为真时，见 common.py:62 / database.py:706），
+    getattr(模块, 'creating_session') 会返回 None 从而静默跳过，
+    导致 player.is_communication 恒为 NULL。详见 Global Constraints 第五条 API 事实。
+    """
+    is_comm = subsession.session.config.get('communication', False)
+    for player in subsession.get_players():
+        player.is_communication = is_comm
 
 
 class Group(BaseGroup):
