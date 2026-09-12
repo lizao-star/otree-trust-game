@@ -1,0 +1,12 @@
+{{ block title }}
+    对方的消息
+{{ endblock }}
+
+{{ block content }}
+<div class="alert alert-info">
+  <p>对方选择的消息是：</p>
+  <p class="lead">「{{ message_from_other }}」</p>
+</div>
+<p class="text-muted">请注意：消息不具约束力，对方没有义务遵守。</p>
+{{ next_button }}
+{{ endblock }}
