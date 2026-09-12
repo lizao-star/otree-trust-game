@@ -1,4 +1,5 @@
 from otree.api import *
+from otree.bots.bot import ExpectError
 from . import *
 
 
@@ -35,6 +36,20 @@ class PlayerBot(Bot):
     def validate_round(self):
         from trust_game import has_communication
         expect(has_communication(self.player), False)
+
+        # 处理组标识必须已由模块级 creating_session 降范式写入每个 Player
+        # （见 trust_game/__init__.py 的说明）。若该函数被误改回 Subsession
+        # 的类方法，oTree 6 会静默跳过它，此字段恒为 NULL，依赖它的分派逻辑
+        # 会走错分支而假通过 —— 所以这里先显式断言非 None，再比对配置值。
+        # 必须用 field_maybe_none()：直接读取 NULL 字段在 oTree 6 中会抛
+        # TypeError，那样就看不到下面这条指明根因的断言消息了。
+        is_comm = self.player.field_maybe_none('is_communication')
+        if is_comm is None:
+            raise ExpectError(
+                'is_communication 为 None：creating_session 从未被调用，'
+                '它必须是模块级函数（见 trust_game/__init__.py）'
+            )
+        expect(is_comm, self.player.session.config.get('communication', False))
 
         if self.player.role == C.INVESTOR_ROLE:
             expect(self.player.send_amount, 5)

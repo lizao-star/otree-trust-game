@@ -36,11 +36,29 @@ def has_communication(player):
 
 
 class Subsession(BaseSubsession):
-    def creating_session(self):
-        """把处理组标识降范式写入每个 Player，使导出数据自包含。"""
-        is_comm = self.session.config.get('communication', False)
-        for player in self.get_players():
-            player.is_communication = is_comm
+    pass
+
+
+def creating_session(subsession: Subsession):
+    """把处理组标识降范式写入每个 Player，使导出数据自包含。
+
+    ！！必须是模块级函数，不要改写成 Subsession 的类方法 ！！
+
+    原因（oTree 6 的解析机制）：本模块含 import 语句，故
+    common.is_noself(app) 为 True（otree/common.py:62）；
+    Subsession.get_user_defined_target() 因此返回**模块**而非类
+    （otree/database.py:706-707）。调用点
+    run_creating_session_functions 执行
+    getattr(target, 'creating_session', None)（otree/session.py:453），
+    在模块上只能找到模块级函数：若写成类方法，getattr 返回 None，
+    本函数被静默跳过，player.is_communication 恒为 NULL —— 依赖它的
+    分派逻辑（如沟通组 bot）会走错分支而假通过，而不会报错。
+    这正是 oTree 自带模板的写法（otree/assets/app_template_trials/__init__.py）。
+    trust_game/tests.py 中的断言会在该字段为 None 时立刻失败，以防回归。
+    """
+    is_comm = subsession.session.config.get('communication', False)
+    for player in subsession.get_players():
+        player.is_communication = is_comm
 
 
 class Group(BaseGroup):
