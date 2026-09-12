@@ -91,6 +91,13 @@ class PlayerBot(Bot):
                          dict(dictator_give=data['dictator_give']),
                          check_html=False)
 
+        # 空提交必须被拒：本页只有 general_trust 一个字段，若它变成可空
+        # （例如加上 blank=True —— 那会同时去掉 InputRequired 与 oTree 的
+        # Boolean/必填拦截），空提交会静默存入 NULL，整套测试仍全绿，
+        # 直到分析阶段读这个字段才炸。error_fields 精确比对保证报错的就是它。
+        yield SubmissionMustFail(GeneralTrust, {},
+                                 check_html=False,
+                                 error_fields=['general_trust'])
         yield Submission(GeneralTrust,
                          dict(general_trust=data['general_trust']),
                          check_html=False)
