@@ -734,7 +734,8 @@ def check_feasibility(pairs, df):
 
     单臂导出（只跑了某一个 session config）做不了任何组间比较。若不先查，脚本会先
     写出标着【真实数据】的描述统计表、再在 t 检验处中止，把产物目录留在「一半新
-    一半旧」的状态——上一轮实际发生过（见报告 §7.1、§9.6）。
+    一半旧」的状态（本项目在开发期实际踩过：`otree test trust_baseline 8 --export`
+    的导出只有基线组，就是这么留下了一张【真实数据】标注的描述统计表）。
     """
     for t, label in [(1, '沟通组'), (0, '基线组')]:
         n = int((pairs.treatment == t).sum())
@@ -786,7 +787,8 @@ def main():
           f'与 payoffs.return_ratio 重算的最大偏差 = {deviation:g}')
 
     # 先把五张表**全部算完**，再统一落盘：任何一处因数据不可行而中止，都不会
-    # 留下「一半新一半旧」的产物目录（单臂导出曾经就是这样，见 §7.1）。
+    # 留下「一半新一半旧」的产物目录（开发期用单臂导出跑时就是这样：只有一张
+    # 描述统计表被写成【真实数据】标注，其余产物还是上一轮的）。
     desc = _stamp(descriptives(df, pairs), note)
     tt = _stamp(t_tests(pairs), note)
     reg = _stamp(regressions(pairs), note)
