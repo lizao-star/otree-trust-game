@@ -33,8 +33,10 @@ import importlib.util
 import os
 import re
 import shutil
+import sys
 import tempfile
 import unittest
+from unittest import mock
 
 import numpy as np
 import pandas as pd
@@ -256,6 +258,124 @@ class TestWideExportValueGuard(unittest.TestCase):
         self.assertTrue(np.array_equal(
             np.sort(pairs_again.x.to_numpy(dtype=float)),
             np.sort(self.pairs_flat.x.to_numpy(dtype=float))))
+
+
+class TestSourceLabelBackstop(unittest.TestCase):
+    """I1 的另一半：按路径推断的「数据来源」标注必须与文件内容交叉核对。
+
+    路径推断对**放错位置的拷贝**无感，两个方向都会产出「标注与来源相反」的产物，
+    且产物本身看不出异常：
+      - 真实导出放到默认路径 → 整份产物被标成【模拟数据】；
+      - 模拟数据拷到别处传给 --data → 整份产物被标成【真实数据】。
+    两个方向都做成用例。另外把「无编号列时只能依赖路径」这一**已知边界**也钉住，
+    免得读者以为这个守卫能覆盖那个情形（不夸大覆盖范围）。
+
+    注意：需要「默认路径 + 内容不像模拟」这一情形的用例，一律通过显式传入
+    is_simulated=True 来构造，**不往默认路径写任何文件**——那是模拟数据集本身，
+    不能被测试改写。
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.analyze = _load_analyze_module()
+        cls.raw = pd.read_csv(DATA_PATH, float_precision='round_trip')
+
+    def _rewritten_codes_file(self, tmpdir, name, rewrite):
+        """把模拟数据的被试编号按 rewrite 改写后另存，模拟「内容不同的数据」。"""
+        path = os.path.join(tmpdir, name)
+        frame = self.raw.copy()
+        frame['participant_code'] = frame.participant_code.map(rewrite)
+        frame.to_csv(path, index=False, encoding='utf-8-sig')
+        return path
+
+    def test_simulated_data_at_default_path_is_accepted(self):
+        """本仓库的常态：默认路径 + 模拟内容，不得中止。"""
+        msg = self.analyze.check_source_label(DATA_PATH, is_simulated=True)
+        self.assertIn(self.analyze.SIMULATED_CODE_PREFIX, msg)
+
+    def test_simulated_copy_outside_default_path_is_rejected(self):
+        """模拟数据被拷到别处再传给 --data：会被标成【真实数据】，必须中止。"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            copy_path = os.path.join(tmpdir, 'all_apps_wide.csv')
+            shutil.copyfile(DATA_PATH, copy_path)
+            with self.assertRaises(SystemExit) as ctx:
+                self.analyze.check_source_label(copy_path, is_simulated=False)
+            self.assertIn(self.analyze.SIMULATED_CODE_PREFIX, str(ctx.exception))
+
+    def test_real_looking_data_at_default_path_is_rejected(self):
+        """真实导出落到默认路径：会被标成【模拟数据】，必须中止。"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fake = self._rewritten_codes_file(
+                tmpdir, 'real_like.csv', lambda code: code.replace('sim_', 'p_'))
+            with self.assertRaises(SystemExit) as ctx:
+                self.analyze.check_source_label(fake, is_simulated=True)
+            self.assertIn('sim_', str(ctx.exception))
+
+    def test_mixed_codes_are_rejected_under_either_label(self):
+        """真实数据与模拟数据混在一起：两个方向的标注都不可信，必须中止。"""
+        # 编号形如 sim_{处理组}_{配对号}_{A|B}（处理组 0/1 各 30 对）：
+        # 处理组 0 的编号保持带前缀，处理组 1 的改写成「真实」编号，
+        # 于是得到一份两半来源不同的数据
+        prefix = self.analyze.SIMULATED_CODE_PREFIX
+        for is_simulated in (True, False):
+            with self.subTest(is_simulated=is_simulated):
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    mixed = self._rewritten_codes_file(
+                        tmpdir, 'mixed.csv',
+                        lambda code: code
+                        if code.rsplit('_', 2)[0].endswith('_0')
+                        else code.replace(prefix, 'p_', 1))
+                    with self.assertRaises(SystemExit) as ctx:
+                        self.analyze.check_source_label(mixed, is_simulated=is_simulated)
+                    self.assertIn('混在了一起', str(ctx.exception))
+
+    def test_main_wires_the_guard_before_reading_data(self):
+        """端到端接线：main() 必须真的调用这道核对，且发生在读数据**之前**。
+
+        没有这一条，把 check_source_label 的调用从 main() 里删掉不会有任何测试
+        失败——守卫就成了死代码（本项目最忌讳的「静默不发生」）。用 load 被打桩
+        成哨兵异常来证明：核对通过时确实走到了 load，核对不通过时根本走不到。
+        两个方向各跑一次，且把 DEFAULT_DATA 指向临时文件，绝不碰真实产物目录。
+        """
+        class _ReachedLoad(Exception):
+            """哨兵：main() 走到了 load()（即核对已通过）。"""
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            simulated_default = os.path.join(tmpdir, 'simulated_data.csv')
+            shutil.copyfile(DATA_PATH, simulated_default)
+            fake_default = self._rewritten_codes_file(
+                tmpdir, 'not_simulated.csv',
+                lambda code: code.replace('sim_', 'p_', 1))
+            saved = self.analyze.DEFAULT_DATA
+            try:
+                with mock.patch.object(sys, 'argv', ['analyze.py']):
+                    for default, expected in [
+                        # 默认路径 + 模拟内容 → 放行（走到 load）
+                        (simulated_default, _ReachedLoad),
+                        # 默认路径 + 内容不像模拟 → 在读数据前中止
+                        (fake_default, SystemExit),
+                    ]:
+                        with self.subTest(default=os.path.basename(default)):
+                            self.analyze.DEFAULT_DATA = default
+                            with mock.patch.object(self.analyze, 'load',
+                                                   side_effect=_ReachedLoad):
+                                with self.assertRaises(expected):
+                                    self.analyze.main()
+            finally:
+                self.analyze.DEFAULT_DATA = saved
+
+    def test_missing_code_column_is_reported_not_aborted(self):
+        """**已知边界**：没有编号列时内容无从判断——不中止，但必须打印出来。
+
+        这一条钉住的是「守卫覆盖到哪里为止」：此时标注仍只由路径决定，
+        守卫提供不了任何独立证据。
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, 'no_codes.csv')
+            (self.raw.drop(columns=['participant_code'])
+             .to_csv(path, index=False, encoding='utf-8-sig'))
+            msg = self.analyze.check_source_label(path, is_simulated=False)
+            self.assertIn('无法据内容核对来源', msg)
 
 
 if __name__ == '__main__':

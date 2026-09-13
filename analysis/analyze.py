@@ -3,6 +3,11 @@
 ⚠️ 默认数据源为模拟数据，所有输出（表格与图）均标注为模拟，不得当作实证结果。
    真实数据导出后，替换 --data 参数即可复用全部流程。
 
+数据来源标注按**路径**判定（默认路径 = 模拟数据，其余 = 真实数据），并在读取
+之前用**文件内容**再核对一次（check_source_label）：两者不一致即中止，不写出
+任何产物——否则把真实导出放到默认路径、或把模拟数据拷到别处传 --data，都会
+产出「标注与来源相反」却看不出异常的结果。
+
 用法：
     python analysis/analyze.py
     python analysis/analyze.py --data path/to/real_data.csv
@@ -76,6 +81,15 @@ DEFAULT_DATA = os.path.join(OUTPUT_DIR, 'simulated_data.csv')
 
 SIMULATION_NOTE = '【模拟数据，非真实被试结果】'
 REAL_NOTE = '【真实数据】'
+
+# 模拟数据的被试编号一律带该前缀（analysis/simulate_data.py 的 code_i / code_t）。
+# 它也是内容侧唯一可用的来源标记：数据 CSV 本身**不带**内嵌标注列（五张产物表
+# 有 `数据来源` 列，数据 CSV 没有），故只能靠编号前缀。
+SIMULATED_CODE_PREFIX = 'sim_'
+
+# 内容侧的被试编号列名：扁平格式（模拟数据）是 participant_code，
+# oTree 宽表导出是 participant.code（由 _rename_otree_export 改成前者）。
+CODE_COLUMNS = ('participant_code', 'participant.code')
 
 SEED = 20260913          # bootstrap 与图中抖动共用（固定以便复现）
 
@@ -155,6 +169,60 @@ REQUIRED_FIELDS = (
 # --------------------------------------------------------------------------
 # 读入与配对合并
 # --------------------------------------------------------------------------
+
+def _read_participant_codes(path):
+    """只读被试编号一列；两种列名都没有时返回 None。"""
+    df = pd.read_csv(path, usecols=lambda col: col in CODE_COLUMNS)
+    for col in CODE_COLUMNS:
+        if col in df.columns:
+            return [str(code) for code in df[col]]
+    return None
+
+
+def check_source_label(path, is_simulated):
+    """交叉核对「按路径推断的来源标注」与「文件内容的实际来源」。
+
+    ⚠️ 本函数存在的理由：按路径推断对**放错位置的拷贝**无感，而两个方向都会产出
+    「标注与数据来源相反」的产物，且产物本身看不出任何异常：
+      - 真实导出被放到默认路径 analysis/output/simulated_data.csv → 整份产物被
+        标成【模拟数据，非真实被试结果】，真实结果被当成演示数据；
+      - simulated_data.csv 被拷到别处再用 --data 传入 → 整份产物被标成
+        【真实数据】，演示数据被当成真实结果。
+    因此读取数据之前先用内容核对一次：模拟数据的被试编号一律以 sim_ 开头，
+    真实 oTree 导出的 participant.code 是随机串。核对不上就中止，不写任何产物。
+
+    返回一行可读的核对说明供 main() 打印。**已知边界（不夸大）**：若数据里两种
+    编号列都没有，内容无从判断，此时**不中止**（那会让合法的导出无法分析），
+    而是把这句「无独立证据、只能依赖路径」如实返回并打印出来。
+    """
+    codes = _read_participant_codes(path)
+    if codes is None:
+        return ('⚠️ 数据中没有被试编号列（participant.code / participant_code），'
+                '无法据内容核对来源；本次标注仅由路径推断，请自行确认路径无误。')
+    n_sim = sum(code.startswith(SIMULATED_CODE_PREFIX) for code in codes)
+    if 0 < n_sim < len(codes):
+        raise SystemExit(
+            f'数据里只有 {n_sim}/{len(codes)} 行被试编号带 {SIMULATED_CODE_PREFIX} '
+            '前缀：真实导出与模拟数据被混在了一起，无法判断整份数据的来源，'
+            '因此无法给出可信的【模拟数据】/【真实数据】标注。本次未写出任何产物。')
+    content_is_simulated = n_sim == len(codes)
+    if content_is_simulated == is_simulated:
+        origin = '模拟数据' if is_simulated else '真实数据'
+        return (f'内容核对一致：{len(codes)} 行被试编号中 {n_sim} 行带 '
+                f'{SIMULATED_CODE_PREFIX} 前缀，与按路径判定的「{origin}」一致。')
+    if content_is_simulated:
+        raise SystemExit(
+            f'文件内容看起来是模拟数据（{len(codes)} 行被试编号全部带 '
+            f'{SIMULATED_CODE_PREFIX} 前缀），但它不在默认路径上，产物会被标成'
+            f'「{REAL_NOTE}」。请直接用默认路径读模拟数据（不要把它拷到别处），'
+            '或在 --data 指向真实导出前确认其编号不含该前缀。本次未写出任何产物。')
+    raise SystemExit(
+        f'默认路径下的数据看起来**不是**模拟数据（被试编号带 '
+        f'{SIMULATED_CODE_PREFIX} 前缀的只有 {n_sim}/{len(codes)} 行），但按路径'
+        f'会被整份标成「{SIMULATION_NOTE}」。若这是真实导出，请用 --data 指向它；'
+        '若确实是模拟数据，请重新运行 analysis/simulate_data.py 生成。'
+        '本次未写出任何产物。')
+
 
 def _parse_export_column(col):
     """拆出 oTree 导出列的 (app, 字段名)。
@@ -771,6 +839,9 @@ def main():
     # 使「标注与数据来源」可被读者直接核对。
     is_simulated = os.path.abspath(args.data) == os.path.abspath(DEFAULT_DATA)
     note = SIMULATION_NOTE if is_simulated else REAL_NOTE
+    # 路径推断对放错位置的拷贝无感（见 check_source_label），故读数据之前先用
+    # 文件内容核对一次；核对不上就中止，不写出任何产物。
+    source_check = check_source_label(args.data, is_simulated)
 
     df, pairs = load(args.data)
     check_feasibility(pairs, df)      # 不可行就什么都不写（见函数 docstring）
@@ -778,6 +849,7 @@ def main():
     print('=' * 72)
     print(f'信任博弈实验分析  {note}')
     print(f'数据源：{os.path.abspath(args.data)}')
+    print(f'[核对] 数据来源标注：{source_check}')
     print(f'被试行：{len(df)}    配对行：{len(pairs)}'
           f'（沟通组 {int((pairs.treatment == 1).sum())} / '
           f'基线组 {int((pairs.treatment == 0).sum())}）')
