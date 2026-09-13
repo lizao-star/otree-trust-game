@@ -2327,8 +2327,24 @@ h2 = tt[tt.假说.str.startswith('H2')].iloc[0]
 print(f"H1 差值={h1.差值}, p={h1.p}, d={h1.Cohens_d}")
 print(f"H2 差值={h2.差值}, p={h2.p}, d={h2.Cohens_d}")
 assert h1.差值 > 0, 'H1 方向应为正'
-assert h1.p < 0.05, 'H1 应显著'
 assert h2.差值 > 0, 'H2 方向应为正'
+
+# ⚠️ 不要断言 H1 必须显著（Task 5 裁定）。
+# 模拟数据是按文献效应量生成的一次抽样，其显著性本身不是分析管线的正确性指标：
+# 设计要求 N=120 在名义 d≈0.64 下功效 93%，即约 7% 的抽样会落在显著阈值之外，
+# 而当前固定种子（20260913，在看到结果之前选定）恰好抽到了一次偏低的结果
+# （差值 1.30 点、d=0.415、p=0.114）。
+# 为让 p 好看而调参或换种子属于选摘，且外部读者无法将其与 p-hacking 区分。
+# 断言应当检验的是「管线算得对不对」，而非「结果是否显著」——故改为校验
+# 统计量与独立手算一致（见下），显著性只需如实报告。
+from scipy import stats as _st
+_inv = df[df.role == 'Investor']
+_a = _inv[_inv.treatment == 1].send_amount
+_b = _inv[_inv.treatment == 0].send_amount
+_t_check, _p_check = _st.ttest_ind(_a, _b, equal_var=False)
+assert abs(_t_check - h1.t) < 1e-6, f'管线 t 值与独立手算不符: {h1.t} vs {_t_check}'
+assert abs(_p_check - h1.p) < 1e-6, f'管线 p 值与独立手算不符: {h1.p} vs {_p_check}'
+print(f'管线统计量与独立手算一致；本次模拟抽样的 H1 显著性如实报告：p={h1.p}')
 
 reg = pd.read_csv('analysis/output/table_regressions.csv')
 print(reg[['模型','treatment','treatment_p','N']].to_string(index=False))
