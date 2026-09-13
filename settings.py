@@ -39,6 +39,11 @@ ADMIN_PASSWORD = environ.get('OTREE_ADMIN_PASSWORD')
 
 DEMO_PAGE_INTRO_HTML = """信任博弈实验 — 演示"""
 
-SECRET_KEY = 'trust-game-experiment-secret-key-2026'
+# 与 ADMIN_PASSWORD 同一条纪律：该文件会进版本库，故密钥只从运行时环境读，
+# 不在仓库里存真值。默认值仅供 otree test / devserver 本地跑通用，正式收集数据
+# 前必须用环境变量替换（见 README「注意事项」第 2 条）。
+# oTree 在 otree/common.py:125 直接做 settings.SECRET_KEY + ADMIN_PASSWORD 的
+# 字符串拼接（用于 make_hash），故该值必须是字符串、不能为 None。
+SECRET_KEY = environ.get('OTREE_SECRET_KEY', 'dev-only-not-for-production')
 
 ROOMS = []
