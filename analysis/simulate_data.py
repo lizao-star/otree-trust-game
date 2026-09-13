@@ -4,9 +4,8 @@
    报告中引用这些结果时必须标注"模拟数据"。
 
 生成原则（规格第 15.4 节）：按文献报告的效应量生成，而非随机噪声。
-  - 基线组 x 均值约 5，右偏，且含真实的零发送质量点
-  - 沟通组 x 均值上移（规格写「约 0.5 个标准差」；本文件取 0.8 SD，
-    实测 d≈0.6，理由见下方 COMM_SHIFT 的取值说明），且零发送率更低
+  - 基线组 x 均值约 5；零膨胀 + 上限堆积，**近似对称**（0 处与 10 处都有堆积）
+  - 沟通组 x 均值上移，且零发送率更低；因右移撞上 x ≤ 禀赋 的天花板，**左偏**
   - 返还比例随 x 递减（经典发现）
   - 承诺强度与返还比例正相关
   - 信念与 x 正相关，沟通提升信念
@@ -18,10 +17,13 @@
     tau    ~ N(0, 1)                                受托人类型，在知道 x 之前确定
     ratio  = 0.45 - 0.035x + 0.19*comm + 0.11*tau   受托人的返还比例，截断到 [0, 1]
     y      = round(ratio * m * x)（x=0 时为 0，即真实规则）
+    imsg   = 0.6 + 0.35x + N(0, 1.3)                投资者的消息强度（意图的代理）
     promise= 2.6 + 0.5*tau + N(0, 0.6)              承诺强度，只由 tau 驱动（见下）
     bonus  = payoffs.belief_bonus(...)              一律调用真值来源
-    消息与承诺强度只在沟通组存在（消息页 MessageSend.is_displayed =
-    has_communication），文案与强度编码取自 trust_game.content 的 0-4 量表。
+    两条消息方程都没有单独的「沟通组」项：消息只在沟通组存在（消息页
+    MessageSend.is_displayed = has_communication），没有基线组可比，
+    该位移不可识别，已并入截距。文案与强度编码取自 trust_game.content
+    的 0-4 量表。
     承诺不含 x 项：消息页排在投资者决策之前，真实被试无法让承诺依赖于 x；
     返还比例里的 -0.035x 是受托人对「收到多少」的反应，不属于类型。
 
@@ -39,20 +41,24 @@
     配对合并再跑同一分析。
 
 参数取值说明（为什么不是「照抄一个数」）：
-  * x 的分布用 Γ + 零膨胀而非正态：规格第 15.4 节要求基线组 x「右偏」，
-    而 N(5, 2.5) 截断到 [0, 10] 后偏度为负（实测约 -0.3）；Γ 截断后偏度
-    为正。零发送是真实信任博弈数据中的常见类型（沟通会显著减少它），
-    用显式质量点（而非把 Γ 硬截到 0）以复现该形态。
-    代价：零质量点把偏度往负方向拉，本种子下基线组实测偏度仅 +0.08
-    （无零膨胀时约 +0.2）——「右偏」与「零发送」在 0-10 有界尺度上互相抵消，
-    规格的两条要求在此处存在张力，取零发送（更贴近真实数据）优先。
+  * x 的分布 = 零膨胀 + Γ 截断。规格第 15.4 节（实现阶段修正）写明：真实信任
+    博弈的送出分布是「0 处有质量点、上限处有堆积（受禀赋约束），常近似对称
+    甚至双峰」，并明确「不要为了让分布满足『右偏』而改动生成器」。本文件据此
+    建模：零膨胀复现 0 处质量点（沟通显著减少它），Γ(4, 1.47) 的右尾在
+    x ≤ 禀赋 处截断形成 10 处堆积。本种子实测：基线组偏度 -0.11、沟通组 -0.14
+    （两组都近似对称、略偏左；沟通组偏左来自整体右移后撞上上限）——都是上式的
+    后果，不是缺陷；10 处堆积比例基线 0.20、沟通 0.30。
   * 返还比例的斜率 -0.035 与噪声 0.11：这两者共同决定「比值随 x 递减」能否
     被检出。斜率太小时（如 -0.015）该相关在 N=120 下不可检出；噪声太大时
     （如 0.25）同理。
-  * COMM_SHIFT：规格第 15.4 节写「提升约 0.5 个标准差」，而规格第 14.3 节又
-    要求模拟数据上「已知效应能被检出」。n=30/组、α=.05 时 d=0.5 的功效仅约
-    50%，逐次抽样常检不出；此处取 0.8 SD（规格第 15.1 节引用的文献区间为
-    d≈0.5–0.9），叠加基线组更高的零发送率后，实测效应量在文献区间内。
+  * COMM_SHIFT = 2.0 点：规格第 15.4 节要求按文献效应量（d ≈ 0.5–0.9）生成，
+    而设计的功效目标是在 N=120、80% 功效下检出 d ≈ 0.51（第 15.1 节）。
+    n=30/组、α=.05 时 d=0.5 的功效仅约 50%，逐次抽样会落在阈值附近，故位移
+    取到使实测效应量落在文献区间内的量级。用实测标准差表述（本数据集）：
+    基线组 x 的 sd ≈ 3.56、组内合并 sd ≈ 3.13，2.0 点 ≈ 0.56 个基线 SD /
+    0.64 个合并 SD。本种子实测 d = 0.415、t = 1.61、p = 0.114 —— 方向为正
+    但未达显著，正是规格第 15.4 节所述的「单次抽样落在功效阈值附近、不跨
+    种子稳健」，故如实保留，未为改善 p 值调参或换种子。
 """
 
 import os
@@ -100,24 +106,25 @@ COMM_SHIFT = 2.0              # 沟通组非零部分上移（见模块 docstrin
 RATIO_TYPE_SD = 0.11
 PROMISE_A, PROMISE_B_TYPE, PROMISE_SD = 2.6, 0.5, 0.6
 
-# 文案 ←→ 0-4 强度编码取自 trust_game.content 的唯一真值源
-_INVESTOR_MESSAGE = {code: label for code, label in content.INVESTOR_MESSAGES}
-_TRUSTEE_MESSAGE = {code: label for code, label in content.TRUSTEE_MESSAGES}
+# 投资者消息强度：意图（=x）的代理。无沟通组项——消息只在沟通组存在
+IMSG_A, IMSG_BX, IMSG_SD = 0.6, 0.35, 1.3
+
+# 消息文案 ←→ 0-4 强度编码的唯一真值源就是 trust_game.content 的两张量表，
+# 本文件不再自建映射表（此前按 dict 身份派发，属多余的间接层）。
 
 
 def _truncated_normal(rng, mean, sd, low, high):
     return float(np.clip(rng.normal(mean, sd), low, high))
 
 
-def _message(rng, mean, sd, table):
-    """抽一条消息，返回 (文案, 强度)。强度由 content.strength_of 反查，
-    保证与真实量表同源。"""
+def _message(rng, mean, sd, messages):
+    """抽一条消息，返回 (文案, 强度)。
+
+    messages 直接传 content.INVESTOR_MESSAGES / content.TRUSTEE_MESSAGES；
+    强度由 content.strength_of 反查，与真实量表同源。"""
     code = int(np.clip(round(rng.normal(mean, sd)), 0, 4))
-    label = table[code]
-    strength = content.strength_of(
-        content.INVESTOR_MESSAGES if table is _INVESTOR_MESSAGE
-        else content.TRUSTEE_MESSAGES, label)
-    return label, strength
+    label = dict(messages)[code]
+    return label, content.strength_of(messages, label)
 
 
 def generate():
@@ -157,15 +164,17 @@ def generate():
             # 消息只在沟通组存在：基线组被试不经过消息页，四列全为空
             if is_comm:
                 # 投资者的消息强度是其「打算送出多少」的代理，与 x 单调对应
-                # （x 本身是同一意图的实现），故用 x 作简化式即可。
+                # （x 本身是同一意图的实现），故用 x 作简化式即可。此处没有
+                # 单独的沟通组项：消息只在沟通组存在，该项不可识别。
                 message_investor, imsg_strength = _message(
-                    rng, 0.6 + 0.35 * send + 0.4, 1.3, _INVESTOR_MESSAGE)
+                    rng, IMSG_A + IMSG_BX * send, IMSG_SD,
+                    content.INVESTOR_MESSAGES)
                 # 承诺强度：只对沟通组生成。截距与噪声让分布铺满 0-4 而非在
                 # 4 处堆顶——堆顶会压掉与返还比例的相关，而 H5 只在沟通组的
                 # 30 名受托人上估计，样本已经很小。
                 message_trustee, promise = _message(
                     rng, PROMISE_A + PROMISE_B_TYPE * trustee_type,
-                    PROMISE_SD, _TRUSTEE_MESSAGE)
+                    PROMISE_SD, content.TRUSTEE_MESSAGES)
             else:
                 message_investor = message_trustee = None
                 imsg_strength = promise = None
@@ -176,12 +185,9 @@ def generate():
 
             code_i = f'sim_{is_comm}_{pair_id}_A'
             code_t = f'sim_{is_comm}_{pair_id}_B'
-            common = dict(
-                is_communication=is_comm,
-                general_trust=int(np.clip(round(rng.normal(6, 2)), 0, 10)),
-                age=int(np.clip(round(rng.normal(20, 1.8)), 16, 60)),
-                econ_courses=int(np.clip(round(rng.normal(3, 2)), 0, 30)),
-            )
+            # 个体层协变量逐人独立抽（同一对的两名被试是不同的人，
+            # 不应共享 general_trust / age / econ_courses；只有处理组是配对级）。
+            common = dict(is_communication=is_comm)
 
             rows.append(dict(
                 participant_code=code_i, role='Investor',
@@ -197,6 +203,9 @@ def generate():
                 gender=str(rng.choice(['男', '女'], p=[0.45, 0.55])),
                 grade=str(rng.choice(['大一', '大二', '大三', '大四'])),
                 prior_experience=bool(rng.random() < 0.2),
+                general_trust=int(np.clip(round(rng.normal(6, 2)), 0, 10)),
+                age=int(np.clip(round(rng.normal(20, 1.8)), 16, 60)),
+                econ_courses=int(np.clip(round(rng.normal(3, 2)), 0, 30)),
                 **common,
             ))
             rows.append(dict(
@@ -214,6 +223,9 @@ def generate():
                 gender=str(rng.choice(['男', '女'], p=[0.45, 0.55])),
                 grade=str(rng.choice(['大一', '大二', '大三', '大四'])),
                 prior_experience=bool(rng.random() < 0.2),
+                general_trust=int(np.clip(round(rng.normal(6, 2)), 0, 10)),
+                age=int(np.clip(round(rng.normal(20, 1.8)), 16, 60)),
+                econ_courses=int(np.clip(round(rng.normal(3, 2)), 0, 30)),
                 **common,
             ))
 
