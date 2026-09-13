@@ -219,7 +219,9 @@ def _rename_otree_export(df):
     if collisions:
         raise SystemExit(
             '导出重命名后字段撞名，无法判断该取哪一列：' + '、'.join(collisions)
-            + '。请检查是否把多个 app 的同名字段混在了一起。')
+            + '。多轮导出的表头是 `{app}.{轮次}.{model}.{字段}`，同一字段在不同'
+              '轮次会撞成同名列——本实验只有一轮，本管线不支持多轮导出，'
+              '请只导出单轮数据。')
     return df.rename(columns=rename)
 
 
@@ -409,7 +411,7 @@ def t_tests(pairs):
 
     def welch(name, sample_label, a, b, primary, remark=''):
         if len(a) < 2 or len(b) < 2:
-            raise ValueError(f'{name}：组内观测不足（{len(a)}/{len(b)}），无法检验')
+            raise SystemExit(f'{name}：组内观测不足（{len(a)}/{len(b)}），无法检验')
         t, p = stats.ttest_ind(a, b, equal_var=False)
         d = cohens_d(a, b)
         se = np.sqrt(a.var(ddof=1) / len(a) + b.var(ddof=1) / len(b))
@@ -473,6 +475,10 @@ def _control_terms(frame):
             # 切分后一侧为空 → 常数列与截距共线，模型秩亏。不进模型，并写明原因。
             labels.append(f'risk_high 未进入（按中位数 {median:g} 切分后一侧为空，'
                           f'n={int(high.sum())}）')
+    else:
+        # 有缺失时不进模型，同样写明原因（原先是不声不响地丢掉）
+        labels.append(f'risk_high 未进入（risk_choice 有 '
+                      f'{int(frame.risk_choice.isna().sum())} 个缺失）')
     if frame.gender.nunique(dropna=True) == 2:
         frame['female'] = (frame.gender == '女').astype(int)
         terms.append('female')
@@ -533,7 +539,7 @@ def mediation(df, n_boot=5000):
     sub = df[df.role == INVESTOR_ROLE][
         ['treatment', 'belief_return_pct', 'send_amount']].dropna()
     if len(sub) < 3:
-        raise ValueError(f'投资者观测不足（N={len(sub)}），无法做中介分析')
+        raise SystemExit(f'投资者观测不足（N={len(sub)}），无法做中介分析')
     rng = np.random.default_rng(SEED)
 
     def indirect(data):
@@ -556,7 +562,7 @@ def mediation(df, n_boot=5000):
             continue
     # 失败的重抽不能悄悄占掉比例：低于 90% 成功即报错而非给一个残缺的 CI
     if len(boots) < 0.9 * n_boot:
-        raise ValueError(f'bootstrap 仅成功 {len(boots)}/{n_boot} 次，'
+        raise SystemExit(f'bootstrap 仅成功 {len(boots)}/{n_boot} 次，'
                          '重抽样本存在系统性问题，CI 不可信')
     lo, hi = np.percentile(boots, [2.5, 97.5])
     return pd.DataFrame([dict(
@@ -584,7 +590,7 @@ def correlation(pairs, df):
         data = pd.DataFrame({'x': np.asarray(x, dtype=float),
                              'y': np.asarray(y, dtype=float)}).dropna()
         if len(data) < 3:
-            raise ValueError(f'{name}（{sample}）：观测不足（N={len(data)}）')
+            raise SystemExit(f'{name}（{sample}）：观测不足（N={len(data)}）')
         r, p = stats.pearsonr(data.x, data.y)
         rho, p_rho = stats.spearmanr(data.x, data.y)
         rows.append(dict(
@@ -719,6 +725,37 @@ def figures(df, pairs, outdir, note):
 # 主流程
 # --------------------------------------------------------------------------
 
+def check_feasibility(pairs, df):
+    """写产物**之前**的可行性检查：不可行就什么都不写。
+
+    单臂导出（只跑了某一个 session config）做不了任何组间比较。若不先查，脚本会先
+    写出标着【真实数据】的描述统计表、再在 t 检验处中止，把产物目录留在「一半新
+    一半旧」的状态——上一轮实际发生过（见报告 §7.1、§9.6）。
+    """
+    for t, label in [(1, '沟通组'), (0, '基线组')]:
+        n = int((pairs.treatment == t).sum())
+        if n < 2:
+            raise SystemExit(
+                f'{label}只有 {n} 个配对，H1/H2 的组间比较无法进行——只有单臂导出'
+                '（或数据缺失）时才会这样。请导出包含全部 session config 的宽表'
+                '（all_apps_wide）后重跑。本次未写出任何产物。')
+    investors = df[(df.role == INVESTOR_ROLE) & df.belief_return_pct.notna()
+                   & df.send_amount.notna()]
+    if len(investors) < 3:
+        raise SystemExit(
+            f'可用投资者观测只有 {len(investors)} 个，H4 中介分析无法进行。'
+            '本次未写出任何产物。')
+
+
+def risk_choice_distribution(df):
+    """risk_choice 的实际分布（0-5 各取值的人数，按处理组）。"""
+    dist = (pd.crosstab(df.risk_choice, df.treatment_label)
+            .reindex(index=range(6), columns=['基线组', '沟通组'], fill_value=0))
+    dist['合计'] = dist.sum(axis=1)
+    dist.loc['合计'] = dist.sum()
+    return dist
+
+
 def main():
     parser = argparse.ArgumentParser(description='信任博弈实验的统计分析')
     parser.add_argument('--data', default=DEFAULT_DATA,
@@ -731,7 +768,7 @@ def main():
     note = SIMULATION_NOTE if is_simulated else REAL_NOTE
 
     df, pairs = load(args.data)
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    check_feasibility(pairs, df)      # 不可行就什么都不写（见函数 docstring）
 
     print('=' * 72)
     print(f'信任博弈实验分析  {note}')
@@ -744,18 +781,28 @@ def main():
     print(f'[核对] return_ratio：{n_stored} 行取导出字段，'
           f'与 payoffs.return_ratio 重算的最大偏差 = {deviation:g}')
 
+    # 先把五张表**全部算完**，再统一落盘：任何一处因数据不可行而中止，都不会
+    # 留下「一半新一半旧」的产物目录（单臂导出曾经就是这样，见 §7.1）。
     desc = _stamp(descriptives(df, pairs), note)
-    desc.to_csv(os.path.join(OUTPUT_DIR, 'table_descriptives.csv'),
-                index=False, encoding='utf-8-sig')
+    tt = _stamp(t_tests(pairs), note)
+    reg = _stamp(regressions(pairs), note)
+    med = _stamp(mediation(df), note)
+    cor = _stamp(correlation(pairs, df), note)
+    dist = risk_choice_distribution(df)
+
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    for filename, frame in [('table_descriptives.csv', desc),
+                            ('table_ttests.csv', tt),
+                            ('table_regressions.csv', reg),
+                            ('table_mediation.csv', med),
+                            ('table_correlation.csv', cor)]:
+        frame.to_csv(os.path.join(OUTPUT_DIR, filename), index=False,
+                     encoding='utf-8-sig')
+
     print('\n【描述统计】')
     print(desc.to_string(index=False))
 
     print('\n【风险偏好 risk_choice 的实际分布】')
-    # 单臂导出（只跑了某一个 config）不该在这里崩：缺的那一组显示 0 行。
-    dist = (pd.crosstab(df.risk_choice, df.treatment_label)
-            .reindex(index=range(6), columns=['基线组', '沟通组'], fill_value=0))
-    dist['合计'] = dist.sum(axis=1)
-    dist.loc['合计'] = dist.sum()
     print(dist.to_string())
     print(f'  0 是否有观测：{"是" if dist.loc[0, "合计"] else "否"}；'
           f'1 是否有观测：{"是" if dist.loc[1, "合计"] else "否"}')
@@ -768,27 +815,15 @@ def main():
           f'低组 {int((pos.risk_choice <= median).sum())} 人。'
           '不做逐取值哑变量，也不解释为等距效应。')
 
-    tt = _stamp(t_tests(pairs), note)
-    tt.to_csv(os.path.join(OUTPUT_DIR, 'table_ttests.csv'),
-              index=False, encoding='utf-8-sig')
     print('\n【t 检验】')
     print(tt.to_string(index=False))
 
-    reg = _stamp(regressions(pairs), note)
-    reg.to_csv(os.path.join(OUTPUT_DIR, 'table_regressions.csv'),
-               index=False, encoding='utf-8-sig')
     print('\n【回归】')
     print(reg.to_string(index=False))
 
-    med = _stamp(mediation(df), note)
-    med.to_csv(os.path.join(OUTPUT_DIR, 'table_mediation.csv'),
-               index=False, encoding='utf-8-sig')
     print('\n【中介分析】')
     print(med.to_string(index=False))
 
-    cor = _stamp(correlation(pairs, df), note)
-    cor.to_csv(os.path.join(OUTPUT_DIR, 'table_correlation.csv'),
-               index=False, encoding='utf-8-sig')
     print('\n【相关分析】')
     print(cor.to_string(index=False))
 
