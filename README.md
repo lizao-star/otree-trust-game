@@ -85,7 +85,7 @@ conda create -n otree python=3.11.16 -y
 │   ├── content.py               消息文案与强度编码（唯一真值来源）
 │   ├── tests.py                 oTree bot 端到端测试（2 个 case）
 │   ├── test_payoffs.py          纯函数单元测试（13 个）
-│   ├── test_content.py          文案与常量同源测试（11 个）
+│   ├── test_content.py          文案与常量同源测试（16 个）
 │   └── *.html                   8 个页面模板
 │
 ├── survey/                      问卷 app（个体测量）
@@ -97,7 +97,7 @@ conda create -n otree python=3.11.16 -y
 │   ├── __init__.py              空文件，使 analysis 可被 unittest discover 发现
 │   ├── simulate_data.py         模拟数据生成（固定种子 20260913）
 │   ├── analyze.py               统计分析管线（5 表 + 4 图）
-│   ├── test_analyze.py          分析管线值级守卫（6 个用例）
+│   ├── test_analyze.py          分析管线值级守卫（12 个用例）
 │   └── output/                  产物目录；除 .gitkeep 外全部 gitignore
 │
 ├── docs/superpowers/
@@ -183,25 +183,25 @@ rm -f db.sqlite3
 ### 5.2 纯函数单元测试与全仓测试
 
 ```bash
-# 纯函数单元测试：收益函数、返还比例、信念奖金、消息强度映射、文案同源（24 个）
+# 纯函数单元测试：收益函数、返还比例、信念奖金、消息强度映射、文案同源（29 个）
 /share/zrs2022150501010/miniconda3/envs/otree/bin/python -m unittest trust_game.test_payoffs trust_game.test_content
 
-# 分析管线的值级守卫（6 个）
+# 分析管线的值级守卫（12 个）
 /share/zrs2022150501010/miniconda3/envs/otree/bin/python -m unittest analysis.test_analyze
 
-# 全仓（30 个）；-t . 指定项目根为顶层目录
+# 全仓（41 个）；-t . 指定项目根为顶层目录
 /share/zrs2022150501010/miniconda3/envs/otree/bin/python -m unittest discover -t .
 ```
 
 **⚠️ 顺序要求：`analysis/test_analyze.py` 依赖 `analysis/output/simulated_data.csv`。**
-在全新检出上该文件不存在，这 6 个用例会**跳过并打印原因**（不是静默跳过）：
+在全新检出上该文件不存在，这 12 个用例会**跳过并打印原因**（不是静默跳过）：
 
 ```
 skipped '需要 analysis/output/simulated_data.csv；请先在项目根运行 python analysis/simulate_data.py'
 ```
 
-此时 `discover` 的输出是 `Ran 30 tests ... OK (skipped=6)`——**实际执行 24 个**。
-要跑满 30 个，请先执行第 7 节的 `simulate_data.py`。
+此时 `discover` 的输出是 `Ran 41 tests ... OK (skipped=12)`——**实际执行 29 个**。
+要跑满 41 个，请先执行第 7 节的 `simulate_data.py`。
 
 ---
 
@@ -274,13 +274,28 @@ cd /share/zrs2022150501010/project/behavioral_experiment
 | `fig_belief_send.png` | 信念 ~ 送出金额（分组拟合） |
 
 数据来源标注**由脚本自动生成、不可手工关闭**：表格首列 `数据来源` 与图的标题/页脚统一写作
-`【模拟数据，非真实被试结果】`；只要 `--data` 不是默认的模拟数据路径，就自动改标
-`【真实数据】`——同时防止"把真实数据标成模拟数据"这一镜像错误。
+`【模拟数据，非真实被试结果】`；`--data` 只要不是默认的模拟数据路径，就自动改标 `【真实数据】`。
+
+**标注按路径判定，另有内容核对兜底。** 路径本身并不能证明数据是什么，故脚本在读取前会用
+**文件内容**核对一次（`analyze.py` 的 `check_source_label`）：模拟数据的被试编号一律以
+`sim_` 开头（`simulate_data.py` 生成），核对不一致就以退出码 1 中止、不写出任何产物。
+被拦下的两种情形正是标注会与来源相反、而产物看不出异常的两种误用：
+
+- **真实导出被放到默认路径** `analysis/output/simulated_data.csv` → 会被整份标成
+  `【模拟数据，非真实被试结果】`（真实结果被当成演示数据）；
+- **把 `simulated_data.csv` 拷到别处再用 `--data` 传入** → 会被整份标成 `【真实数据】`
+  （演示数据被当成真实结果）。**因此不要复制模拟数据 CSV 再传给 `--data`**：要重跑演示，
+  直接用默认路径即可；模拟数据 CSV 本身**不带**内嵌的标注列（只有五张产物表有 `数据来源` 列），
+  内容侧的唯一判据就是被试编号前缀。
+
+**已知边界：** 若数据里没有被试编号列（`participant.code` / `participant_code` 都没有），
+内容无从核对，脚本会打印"无法据内容核对来源、仅由路径推断"后继续运行——此时标注是否正确
+完全取决于路径。
 
 `--data` 指向真实导出时，脚本会自动利用宽表结构完成**配对合并**（x 只在投资者行、y 只在
 受托人行，故凡同时使用 x 与 y 的模型都先合并成"每对一行"再估计）。
 
-**第 3 步：跑分析测试**（依赖第 1 步的产物；6 个用例）
+**第 3 步：跑分析测试**（依赖第 1 步的产物；12 个用例）
 
 ```bash
 /share/zrs2022150501010/miniconda3/envs/otree/bin/python -m unittest analysis.test_analyze
@@ -304,7 +319,7 @@ cd /share/zrs2022150501010/project/behavioral_experiment
 | 6 | 设计规格 | `/share/zrs2022150501010/project/behavioral_experiment/docs/superpowers/specs/2026-09-13-trust-game-design.md` |
 | 7 | 实施计划 | `/share/zrs2022150501010/project/behavioral_experiment/docs/superpowers/plans/2026-09-13-trust-game-implementation.md` |
 
-测试合计：纯函数单元测试 24 个 + 分析管线守卫 6 个 = **30 个**（`unittest discover` 全仓）；
+测试合计：纯函数单元测试 29 个 + 分析管线守卫 12 个 = **41 个**（`unittest discover` 全仓）；
 另有两个 config 的 oTree bot 端到端测试。页面模板 12 个（`trust_game/` 8 个 + `survey/` 4 个）。
 
 ---
@@ -325,6 +340,19 @@ cd /share/zrs2022150501010/project/behavioral_experiment
    ```
    口令只放在运行时环境里，不要写进任何代码、注释或日志。
 
+   **同一条纪律适用于 `SECRET_KEY`。** `settings.py` 中
+   `SECRET_KEY = environ.get('OTREE_SECRET_KEY', 'dev-only-not-for-production')`：
+   仓库里的那个默认值只是一个**开发占位符**，作用是让 `otree test` 与 devserver
+   免配置即可跑通；它已经出现在版本库里、任何人都读得到，**不得用于正式收集数据**。
+   正式部署前必须替换：
+   ```bash
+   export OTREE_SECRET_KEY='<自行生成一个长随机串>'
+   ```
+   该值参与 oTree 的 `make_hash`（`otree/common.py:125`：与 `ADMIN_PASSWORD`
+   拼接后散列），而 `make_hash` 用于 room 的安全链接校验
+   （`otree/room.py:109`、`otree/views/participant.py:269`）与数据导出相关的哈希
+   （`otree/common.py:139`）。默认值既已公开，这层混淆在正式运行中等于不存在。
+
 3. **正式收集数据时应设置 `OTREE_PRODUCTION=1`**，并配合 `prodserver` 而非 `devserver`：
    ```bash
    export OTREE_PRODUCTION=1
@@ -342,7 +370,7 @@ cd /share/zrs2022150501010/project/behavioral_experiment
 
 5. **`analysis/output/` 除 `.gitkeep` 外全部被 `.gitignore` 排除。** 模拟数据、表格与图都是
    可再生产物，不随仓库分发。全新检出后该目录是空的，必须先跑第 7 节的第 1 步，否则
-   `实验报告.md` 第 8.8 节的 4 张图无法显示、6 个分析测试会被跳过。
+   `实验报告.md` 第 8.8 节的 4 张图无法显示、12 个分析测试会被跳过。
 
 6. **本机在 NFS 挂载上，sqlite 写入失败。** 因此：
    - `otree devserver` 与 `otree test` 可以正常用（oTree 内部强制内存库）；
@@ -370,5 +398,5 @@ cd /share/zrs2022150501010/project/behavioral_experiment
    `trust_baseline` 与 `trust_communication` 两个 config，**没有** `survey` config。
 
 10. **`analysis/__init__.py` 是有意保留的空文件。** 删掉它会让
-    `python -m unittest discover -t .` **静默跳过**整个 `analysis/`（只跑 24 个而不是 30 个，
+    `python -m unittest discover -t .` **静默跳过**整个 `analysis/`（只跑 29 个而不是 41 个，
     且不给任何提示）。这是本项目最忌讳的"静默不发生"，故不要删除。
