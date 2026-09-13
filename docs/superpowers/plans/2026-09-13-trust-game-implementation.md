@@ -1776,6 +1776,14 @@ Expected: `4`。
 
 ## Task 5: 模拟数据生成
 
+> **⚠️ 本节下方内嵌的 `simulate_data.py` 代码块已过时，不要照抄、不要据此重新生成数据。**
+> 实现阶段依据实测做了多项标定（分布改为零膨胀 Γ、比值斜率与噪声、沟通位移、
+> 承诺不再依赖 x、基线组消息字段置空等），**唯一权威版本是仓库中的
+> `analysis/simulate_data.py`**。保留旧代码块只会构成第三份参数副本——
+> 而这正是本任务设立时要消灭的那类缺陷（本项目已多次因"两处真值源"产生静默偏离）。
+> 需要了解生成过程时请直接读该文件，它的 docstring 以显式方程形式记录了生产过程的
+> 每个参数及其标定依据。
+
 **Files:**
 - Create: `analysis/simulate_data.py`
 - Create: `analysis/output/`（目录已在 Task 1 建立）
@@ -1985,6 +1993,41 @@ Expected: `121`（表头 + 120 行）。
   `table_descriptives.csv`、`table_ttests.csv`、`table_regressions.csv`、
   `table_mediation.csv`、`table_correlation.csv`、
   `fig_send_amount.png`、`fig_return_ratio.png`、`fig_promise_ratio.png`、`fig_belief_send.png`
+
+- [ ] **Step 0: 先解决一个真实导出数据的结构问题（Task 5 审查发现，必做）**
+
+**⚠️ 计划的 H3 模型在真实导出数据上无法估计。**
+
+真实 oTree 导出中，每个被试的**自己那一行只存自己的字段**：x（`send_amount`）只在投资者行、y（`return_amount`）只在受托人行。而模拟数据把这两列复制到了每一行（`simulate_data.py` 有说明）。因此：
+
+- 计划里的 `return_amount ~ treatment + send_amount` 若直接取受托人行，**在真实数据上 `send_amount` 全为 NULL，模型无法估计**；
+- 模拟数据能跑通只是因为它做了复制，**掩盖了这个缺口**。
+
+**必须在 `analyze.py` 中显式做配对合并**（pair-merge）：
+
+```python
+def load(path):
+    df = pd.read_csv(path)
+    df['treatment'] = df['is_communication'].astype(int)
+    df['pair_id'] = df['participant_code'].str.rsplit('_', n=1).str[0]
+
+    # 把同一对的两行合成一行：投资者的 x + 受托人的 y
+    # 真实导出与模拟数据都适用——真实导出中对方行的字段本就为空，合并后才完整
+    inv = (df[df.role == 'Investor']
+           [['pair_id', 'treatment', 'send_amount']]
+           .rename(columns={'send_amount': 'x'}))
+    tru = (df[df.role == 'Trustee']
+           [['pair_id', 'return_amount', 'promise_strength',
+             'belief_investor_send']]
+           .rename(columns={'return_amount': 'y'}))
+    pairs = inv.merge(tru, on='pair_id', how='inner', suffixes=('', '_t'))
+    pairs['return_ratio'] = np.where(pairs.x > 0, pairs.y / (3 * pairs.x), 0.0)
+    return df, pairs
+```
+
+所有需要同时用到 x 与 y 的模型（**H3 全部三个模型**、H5）一律基于 `pairs`，不要基于 `df`。
+
+**⚠️ 汇总性计算的副本陷阱：** 在 `df`（120 行）上做求和/求均值类计算时，x 与 y 各出现两次（投资者行一次、受托人行一次），会**低估标准误**；真实导出中对方行为空会被丢弃，得到的是 60 个观测。凡涉及 x 或 y 的分布/均值/检验，一律在 `pairs`（60 行）或按角色过滤后的子集上做，**不要在未过滤的 `df` 上做**。
 
 - [ ] **Step 1: 写 `analysis/analyze.py`**
 
