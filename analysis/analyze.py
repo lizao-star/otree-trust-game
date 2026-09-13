@@ -23,8 +23,22 @@
 统计一律在 pairs 或按角色过滤后的子集上做，绝不在未过滤的逐被试帧上做。
 
 
+为什么要按 app 定点取字段
+--------------------------
+oTree 为**每个 app** 都导出内建字段（otree/export.py:110-127：player.id_in_group、
+player.role、group.id_in_subsession、subsession.round_number），宽表表头形如
+`{app}.{round}.{model}.{fname}`，因此 `trust_game.*` 与 `survey.*` 各有一份同名
+字段（实测 `otree test trust_baseline 8 --export` 的表头即如此）。而 survey 是
+单人 app：`survey.1.player.role` 实测全为空、`survey.1.group.id_in_subsession`
+实测全为 1。若不按 app 拆分，role 会变成空列、配对会全塌成一对——不是报错，而是
+**静默算错**。故 FIELD_SOURCE 把每个消费字段钉到唯一 app，撞名则报错（见
+`_rename_otree_export`）。
+
+
 统计量的样本与检验（引用时必须带上限定，见规格 §15.4）
 ------------------------------------------------------
+（以下 N 与数值均为**当前模拟数据集**的实测值，供报告引用时对照；真实导出按实际
+样本生成 `样本` 列与 `N` 列，脚本里没有任何写死的 N。）
 H1  全部 30+30 名投资者，**Welch**；同数据 Student 检验仅第四位小数不同，
     脚本在「备注」列同时打印两者，引用 p 时须写明检验名。
 H2  规格注册口径为**全部 60 名受托人**（主结果）；另给仅 x>0（55 人）的备选口径。
@@ -92,23 +106,87 @@ content = _load_module('content')
 INVESTOR_ROLE = content.INVESTOR_ROLE
 TRUSTEE_ROLE = content.TRUSTEE_ROLE
 
+GAME_APP = 'trust_game'
+SURVEY_APP = 'survey'
+
+# 本管线消费的字段 → 其唯一来源 app。
+#
+# ⚠️ oTree 为**每个 app** 都输出内建字段（otree/export.py:110-127 的 specs：
+# player.id_in_group、player.role、group.id_in_subsession、subsession.round_number），
+# 表头形如 `{app}.{round}.{model}.{fname}`。本项目 session 为
+# ['trust_game', 'survey']，故这些名字在宽表里**各出现两份**（实测
+# `otree test trust_baseline 8 --export` 的表头：第 24/25/42/43 列来自
+# trust_game，第 44/45/61/62 列来自 survey）。而 survey 是单人 app：
+# `survey.1.player.role` 实测**全为空**、`survey.1.group.id_in_subsession`
+# 实测**全为 1**——若按「后出现的同名列覆盖前者」重命名，role 会变成空列、
+# 配对会全部塌成一对。因此必须按 app 定点取值：博弈字段取 trust_game，
+# 问卷字段取 survey。
+FIELD_SOURCE = {
+    'role': GAME_APP,
+    'is_communication': GAME_APP,
+    'send_amount': GAME_APP,
+    'return_amount': GAME_APP,
+    'return_ratio': GAME_APP,
+    'belief_return_pct': GAME_APP,
+    'belief_investor_send': GAME_APP,
+    'promise_strength': GAME_APP,
+    'id_in_subsession': GAME_APP,      # 配对由博弈的 group 定义（survey 的是单人组）
+    'risk_choice': SURVEY_APP,
+    'dictator_give': SURVEY_APP,
+    'general_trust': SURVEY_APP,
+    'gender': SURVEY_APP,
+    'grade': SURVEY_APP,
+    'prior_experience': SURVEY_APP,
+    'age': SURVEY_APP,
+    'econ_courses': SURVEY_APP,
+    'major': SURVEY_APP,
+}
+
+# 本管线离开就没有意义的字段：缺任何一个都直接报错，而不是让下游在某处抛
+# KeyError 或悄悄产出 NaN 列（单 app 导出只含一个 app 的字段，必然缺一批）。
+REQUIRED_FIELDS = (
+    'role', 'is_communication', 'send_amount', 'return_amount',
+    'belief_return_pct', 'promise_strength',
+    'risk_choice', 'dictator_give', 'general_trust', 'gender', 'age',
+    'econ_courses',
+)
+
 
 # --------------------------------------------------------------------------
 # 读入与配对合并
 # --------------------------------------------------------------------------
 
+def _parse_export_column(col):
+    """拆出 oTree 导出列的 (app, 字段名)。
+
+    宽表表头形如 `trust_game.1.player.send_amount`；单 app 导出则是
+    `player.send_amount`（无 app 前缀，app 记为 None）。非模型列返回
+    (None, None)。
+    """
+    for model in ('player', 'group', 'subsession'):
+        marker = '.' + model + '.'
+        if marker in col:
+            prefix, field = col.rsplit(marker, 1)
+            return prefix.split('.', 1)[0], field
+        if col.startswith(model + '.'):
+            return None, col.split('.', 1)[1]
+    return None, None
+
+
 def _rename_otree_export(df):
     """把 oTree 导出的列名转成本脚本使用的扁平列名。
 
-    默认下载的宽表（all_apps_wide）表头形如：
+    宽表（all_apps_wide）表头形如：
         participant.code / session.code / trust_game.1.player.send_amount /
         trust_game.1.player.role / trust_game.1.group.id_in_subsession /
         survey.1.player.risk_choice
     单 app 导出的表头则是 player.role / group.id_in_subsession 这种短名。
-    两者都归一到扁平名（player.* / group.* / subsession.* 去掉模型段，
-    participant.* / session.* 保留前缀以免与玩家字段撞名）。
-    本实验只有一轮，故直接取最后一段字段名；若传入多轮导出（同名字段会撞车），
-    报错而不是静默保留一列。
+
+    只重命名本管线**消费的字段**（FIELD_SOURCE），且按 app 定点取：每个 app 的
+    内建字段（id_in_group / role / id_in_subsession / round_number）在宽表里
+    各有两份，同名不同义（见 FIELD_SOURCE 的注释），故另一份被丢弃；不在清单
+    内的列一律不取（它们不在本管线的分析范围内）。participant.* / session.* 保留
+    前缀以免与玩家字段撞名。
     """
     if 'participant.code' not in df.columns and 'player.role' not in df.columns:
         return df                      # 已是扁平格式（模拟数据）
@@ -117,25 +195,31 @@ def _rename_otree_export(df):
     for col in df.columns:
         if col.startswith('participant.'):
             rename[col] = 'participant_' + col.split('.', 1)[1]
-        elif col.startswith('session.'):
+            continue
+        if col.startswith('session.'):
             rename[col] = 'session_' + col.split('.', 1)[1]
-        else:
-            for marker in ('.player.', '.group.', '.subsession.'):
-                if marker in col:
-                    rename[col] = col.rsplit(marker, 1)[1]
-                    break
-            else:
-                for model in ('player', 'group', 'subsession'):
-                    if col.startswith(model + '.'):
-                        rename[col] = col.split('.', 1)[1]
-                        break
+            continue
+        app, field = _parse_export_column(col)
+        if field is None:
+            continue                   # 非模型列（未知）：原样保留
+        source = FIELD_SOURCE.get(field)
+        if source is None:
+            continue                   # 不在消费清单内
+        if app is not None and app != source:
+            continue                   # 同名内建字段，但来自另一个 app：不是要的那一份
+        rename[col] = field
 
-    duplicated = [c for c in rename.values() if c in df.columns]
-    if duplicated:
+    # 撞名检查必须比较**映射后的新名字**（同名两份本应在上面按 app 拆掉；
+    # 若还剩下，说明导出里有本脚本判断不了的歧义）。
+    mapped = list(rename.values())
+    collisions = sorted(
+        {n for n in mapped if mapped.count(n) > 1}
+        | {n for n in mapped if n in df.columns and n not in rename}
+    )
+    if collisions:
         raise SystemExit(
-            '检测到 oTree 导出中存在重名字段（本实验只有一轮，'
-            f'多轮导出不受支持）：{sorted(set(duplicated))}'
-        )
+            '导出重命名后字段撞名，无法判断该取哪一列：' + '、'.join(collisions)
+            + '。请检查是否把多个 app 的同名字段混在了一起。')
     return df.rename(columns=rename)
 
 
@@ -166,8 +250,12 @@ def load(path):
     df = pd.read_csv(path, float_precision='round_trip')
     df = _rename_otree_export(df)
 
-    if 'is_communication' not in df.columns:
-        raise SystemExit('数据缺少 is_communication 列，无法构造 treatment')
+    missing = [f for f in REQUIRED_FIELDS if f not in df.columns]
+    if missing:
+        raise SystemExit(
+            '数据缺少本管线必需的字段：' + '、'.join(missing)
+            + '。若这是单 app 导出，请改用宽表（all_apps_wide）导出——'
+            '本管线同时需要 trust_game 与 survey 的字段。')
     df['treatment'] = df['is_communication'].astype(int)
     df['treatment_label'] = df['treatment'].map({1: '沟通组', 0: '基线组'})
     df['pair_id'] = _pair_id(df)
@@ -224,12 +312,16 @@ def load(path):
 # --------------------------------------------------------------------------
 
 def cohens_d(a, b):
-    """两组独立样本的 Cohen's d（用组内合并标准差）。"""
+    """两组独立样本的 Cohen's d（用组内合并标准差）。
+
+    合并标准差为 0（组内毫无变异）时返回 NaN 而不是 0.0：0.0 会被读成「无效应」，
+    而真相是「本样本算不出效应量」。NaN 在表里是显眼的缺口，不会被当成一个数。
+    """
     na, nb = len(a), len(b)
     pooled = np.sqrt(((na - 1) * a.var(ddof=1) + (nb - 1) * b.var(ddof=1))
                      / (na + nb - 2))
     if pooled == 0:
-        return 0.0
+        return float('nan')
     return (a.mean() - b.mean()) / pooled
 
 
@@ -258,7 +350,8 @@ RISK_CHOICE_LABEL = '风险偏好（选「确定金额」的行数，0-5）'
 def descriptives(df, pairs):
     """分处理组的描述统计。
 
-    单位：投资者变量按「人」（30+30），涉及 y / ratio 的行按「对」（30+30）。
+    单位：投资者变量按「人」，涉及 y / ratio 的行按「对」；N 由数据决定，
+    写在 `N` 列（模拟数据为 30+30，真实导出按实际样本）。
     比率类变量只在 x>0 上定义（x=0 时比例恒为 0，是退化值，不是低返还）。
     """
     investors = df[df.role == INVESTOR_ROLE]
@@ -308,6 +401,9 @@ def t_tests(pairs):
 
     样本一律取配对帧：x 与 y 在逐被试帧上各出现两次，在未过滤的 120 行上做检验
     会把 60 个值用两遍、低估标准误。
+
+    样本量一律写进 `样本` 列，**标签里不写死 N**——真实导出的 N 与模拟数据不同，
+    写死会让真实结果被贴上模拟数据的标签（N_沟通组 / N_基线组 两列同时给出）。
     """
     rows = []
 
@@ -318,12 +414,15 @@ def t_tests(pairs):
         d = cohens_d(a, b)
         se = np.sqrt(a.var(ddof=1) / len(a) + b.var(ddof=1) / len(b))
         diff = a.mean() - b.mean()
-        ci = (diff - 1.96 * se, diff + 1.96 * se)     # 正态近似
+        # 正态近似（diff ± 1.96·se），**不是** Welch 检验的精确区间；
+        # 列名里写明，免得与「检验 = Welch t」并排时被当作 Welch 区间引用。
+        ci = (diff - 1.96 * se, diff + 1.96 * se)
         rows.append(dict(
             假说=name, 样本=sample_label, N_沟通组=len(a), N_基线组=len(b),
             沟通组均值=round(a.mean(), 3), 基线组均值=round(b.mean(), 3),
             差值=round(diff, 3),
-            差值的95CI=f'[{ci[0]:.3f}, {ci[1]:.3f}]',
+            **{'差值的95CI（正态近似，非 Welch 区间）':
+               f'[{ci[0]:.3f}, {ci[1]:.3f}]'},
             t=round(t, 3), p=_fmt_p(p), Cohens_d=round(d, 3),
             检验='Welch t（不假设方差齐性）', 主结果=primary, 备注=remark,
         ))
@@ -331,19 +430,24 @@ def t_tests(pairs):
     comm, base = pairs[pairs.treatment == 1], pairs[pairs.treatment == 0]
 
     _t_student, p_student = stats.ttest_ind(comm.x, base.x, equal_var=True)
-    welch('H1: 送出金额 x', '全部投资者（30+30；配对帧中每对一行 x）',
+    welch('H1: 送出金额 x',
+          f'全部投资者（{len(comm)}+{len(base)}；配对帧中每对一行 x）',
           comm.x, base.x, '是',
           remark=f'Student t 检验 p={p_student:.4f}（仅第四位小数不同）；'
                  '引用 p 须写明检验名')
 
-    # H2 规格注册口径：全部 60 名受托人（含 x=0 的比例 0 值）
-    welch('H2: 返还比例（规格注册口径）', '全部受托人（30+30 对）',
+    # H2 规格注册口径：全部受托人（含 x=0 的比例 0 值）
+    welch('H2: 返还比例（规格注册口径）',
+          f'全部受托人（{len(comm)}+{len(base)} 对）',
           comm.return_ratio, base.return_ratio, '是',
           remark='含 x=0 的退化比例 0；与备选口径结论方向一致但量值不同')
     # H2 备选口径：仅 x>0
     pos = pairs[pairs.x > 0]
-    welch('H2（备选口径）: 返还比例', '仅 x>0 的受托人（29+26 对）',
-          pos[pos.treatment == 1].return_ratio, pos[pos.treatment == 0].return_ratio,
+    pos_comm = pos[pos.treatment == 1]
+    pos_base = pos[pos.treatment == 0]
+    welch('H2（备选口径）: 返还比例',
+          f'仅 x>0 的受托人（{len(pos_comm)}+{len(pos_base)} 对）',
+          pos_comm.return_ratio, pos_base.return_ratio,
           '否', remark='剔除 x=0 的退化比例 0；仅作稳健性对照，不作为主结果')
     return pd.DataFrame(rows)
 
@@ -359,10 +463,16 @@ def _control_terms(frame):
 
     if frame.risk_choice.notna().all():
         median = frame.risk_choice.median()
-        frame['risk_high'] = (frame.risk_choice > median).astype(int)
-        terms.append('risk_high')
-        labels.append(f'risk_high（risk_choice>{median:g}，中位数切分；'
-                      f'n={int(frame.risk_high.sum())}）')
+        high = frame.risk_choice > median
+        if high.nunique() == 2:
+            frame['risk_high'] = high.astype(int)
+            terms.append('risk_high')
+            labels.append(f'risk_high（risk_choice>{median:g}，中位数切分；'
+                          f'n={int(high.sum())}）')
+        else:
+            # 切分后一侧为空 → 常数列与截距共线，模型秩亏。不进模型，并写明原因。
+            labels.append(f'risk_high 未进入（按中位数 {median:g} 切分后一侧为空，'
+                          f'n={int(high.sum())}）')
     if frame.gender.nunique(dropna=True) == 2:
         frame['female'] = (frame.gender == '女').astype(int)
         terms.append('female')
@@ -404,8 +514,10 @@ def regressions(pairs):
             treatment=round(model.params['treatment'], 4),
             treatment_se=round(model.bse['treatment'], 4),
             treatment_p=_fmt_p(model.pvalues['treatment']),
-            send_amount=round(model.params['x'], 4),
-            send_amount_p=_fmt_p(model.pvalues['x']),
+            # 列名带「系数」二字：这一列装的是 x 的**回归系数**，不是 x 本身
+            # （叫 send_amount 会被当成可回归的自变量，报告引用时极易误读）。
+            **{'x系数': round(model.params['x'], 4),
+               'x系数_p': _fmt_p(model.pvalues['x'])},
             N=int(model.nobs), R2=round(model.rsquared, 4),
             控制变量=control_label if use_controls else '无',
             备注=remark,
@@ -482,15 +594,20 @@ def correlation(pairs, df):
             备注=remark,
         ))
 
-    # H5：承诺强度只在沟通组存在（基线组不经过消息页）
-    comm_trustees = pairs[pairs.promise_strength.notna()]
-    pos_comm = comm_trustees[comm_trustees.x > 0]
-    add('H5: 承诺强度 ~ 返还比例', '沟通组受托人，仅 x>0（主要规格）',
+    # H5：承诺强度只在沟通组存在（基线组不经过消息页）。**组的定义用 treatment**，
+    # 不能用「承诺非空」——否则沟通组里漏答消息页的受托人会让样本悄悄缩小，而标签
+    # 仍写着「沟通组」。缺失就按缺失剔除，并把人数写进备注，不让它无声发生。
+    comm_group = pairs[pairs.treatment == 1]
+    n_missing = int(comm_group.promise_strength.isna().sum())
+    missing_note = (f'；另有 {n_missing} 名沟通组受托人承诺缺失，按缺失剔除'
+                    if n_missing else '；沟通组内无承诺缺失')
+    pos_comm = comm_group[comm_group.x > 0]
+    add('H5: 承诺强度 ~ 返还比例', '沟通组受托人（treatment==1），仅 x>0（主要规格）',
         pos_comm.promise_strength, pos_comm.return_ratio,
-        'x=0 时比例为退化 0，含之会稀释 H5 所考察的量')
-    add('H5: 承诺强度 ~ 返还比例', '沟通组受托人，含 x=0（对照）',
-        comm_trustees.promise_strength, comm_trustees.return_ratio,
-        '与主要规格同向但更弱；两者须分别标注')
+        'x=0 时比例为退化 0，含之会稀释 H5 所考察的量' + missing_note)
+    add('H5: 承诺强度 ~ 返还比例', '沟通组受托人（treatment==1），含 x=0（对照）',
+        comm_group.promise_strength, comm_group.return_ratio,
+        '与主要规格同向但更弱；两者须分别标注' + missing_note)
 
     # 信念~x：组内关系，必须分组报告；合并值只作对照
     for t, glabel in [(0, '基线组'), (1, '沟通组')]:
@@ -540,7 +657,8 @@ def figures(df, pairs, outdir, note):
                 label=label, color=color)
     ax.set_xlabel('投资者送出金额 x（点）')
     ax.set_ylabel('对数')
-    ax.set_title(f'投资者送出金额的分布（30+30 对）\n{note}')
+    ax.set_title(f'投资者送出金额的分布（{int((pairs.treatment == 1).sum())}'
+                 f'+{int((pairs.treatment == 0).sum())} 对）\n{note}')
     ax.legend()
     _save(fig, outdir, 'fig_send_amount.png', note)
 
@@ -557,7 +675,9 @@ def figures(df, pairs, outdir, note):
     _save(fig, outdir, 'fig_return_ratio.png', note)
 
     # 3) 承诺强度 ~ 返还比例（H5 主要规格：沟通组受托人、仅 x>0）
-    sub = pairs[pairs.promise_strength.notna() & (pairs.x > 0)]
+    # 组按 treatment 定义；承诺缺失（漏答消息页）按缺失剔除，不让样本无声缩小。
+    sub = (pairs[(pairs.treatment == 1) & (pairs.x > 0)]
+           .dropna(subset=['promise_strength']))
     r, p = stats.pearsonr(sub.promise_strength, sub.return_ratio)
     fig, ax = plt.subplots(figsize=(7, 4))
     jitter = rng.uniform(-0.08, 0.08, len(sub))
@@ -631,8 +751,9 @@ def main():
     print(desc.to_string(index=False))
 
     print('\n【风险偏好 risk_choice 的实际分布】')
-    dist = pd.crosstab(df.risk_choice, df.treatment_label).reindex(
-        range(6), fill_value=0)[['基线组', '沟通组']]
+    # 单臂导出（只跑了某一个 config）不该在这里崩：缺的那一组显示 0 行。
+    dist = (pd.crosstab(df.risk_choice, df.treatment_label)
+            .reindex(index=range(6), columns=['基线组', '沟通组'], fill_value=0))
     dist['合计'] = dist.sum(axis=1)
     dist.loc['合计'] = dist.sum()
     print(dist.to_string())
