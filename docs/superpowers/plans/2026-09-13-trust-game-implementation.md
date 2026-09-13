@@ -16,7 +16,10 @@
   - `otree resetdb` **必须**加前缀：`OTREE_IN_MEMORY=1 otree resetdb --noinput`。
   - **不要**试图用 symlink 把 `db.sqlite3` 指向 `/tmp` 来绕过——这会破坏 `otree test` 的版本校验（已实测被拒）。
   - 空文件 `db.sqlite3` 会在任何 app 导入时被重新创建（oTree 导入期无条件连接），属正常现象，已在 `.gitignore` 中忽略。
-- **`otree test` 依赖 `requests`**：缺失时它打印提示后**静默退出且退出码为 0**，极易被误判为测试通过。Task 1 Step 2 必须先安装。
+- **`otree test` 依赖 `requests`**：缺失时必须安装（Task 1 Step 2）。**更正**：本节早期版本称其"静默退出且退出码为 0"——**该结论错误，源于控制者的观测方法缺陷**（用 `otree test ... | tail` 后取 `$?`，实际取到的是管道末端 `tail` 的退出码，而非 `otree` 的）。源码实为 `otree/bots/bot.py:223-226` 的 `sys.exit('You need to install requests to run bots (...)')`：**打印到 stderr 并以退出码 1 退出**，是响亮的失败而非静默假通过。安装 `requests` 仍是必需的，只是失败模式与原文所述相反。
+
+- **⚠️ 数据持久化（Task 8 验收发现，影响真实实验的可行性）**：`otree/main.py:106-107` 对 `devserver_inner` 与 `bots` 强制 `OTREE_IN_MEMORY=1`——**这是 oTree 自身的设计，与 NFS 无关**。因此 **`otree devserver` 在任何平台上都不把会话数据写入磁盘，关闭服务器即丢失数据**，它只是开发工具，不是数据采集工具。正式采集须用 `prodserver`（需要可持久化的数据库）。
+  **本项目当前目录位于 NFS 挂载（sqlite 写入失败），故 `prodserver` 在此不可用——即当前目录无法用于真实数据采集。** 要跑真实实验，须把项目移至本地磁盘，或配置一个可写的数据库（如 PostgreSQL）。另据验收实测：在此挂载上 `otree create_session` 会**无报错挂起**、`otree resetdb --help` 本身即崩溃。
 
 ### ⚠️ oTree 6 Bot 测试的四个 API 事实（Task 2 实测确认，写测试代码前必读）
 
