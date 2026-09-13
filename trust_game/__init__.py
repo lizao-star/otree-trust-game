@@ -35,6 +35,17 @@ def has_communication(player):
     return player.session.config.get('communication', False)
 
 
+def amount_for_copy(value):
+    """把配置中的金额渲染成被试可读的字符串：20.0 -> '20'，2.5 -> '2.5'。
+
+    **不做四舍五入**：取整会让指导语里的金额与被试实际拿到的金额不一致，
+    那正是本项目反复出现的「两处真值源」缺陷，只不过这次印在被试读的文案上。
+    模板侧只允许 `{{ ... }}` 引用本函数的返回值，不得写字面量。
+    """
+    number = float(value)
+    return str(int(number)) if number.is_integer() else str(number)
+
+
 class Subsession(BaseSubsession):
     pass
 
@@ -141,6 +152,19 @@ class Introduction(Page):
             # trust_game/test_content.py 会断言渲染结果与这两个常量一致。
             belief_tolerance_pct=payoffs.BELIEF_TOLERANCE_PCT,
             belief_bonus_points=payoffs.BELIEF_BONUS_POINTS,
+            # 报酬口径（出场费、兑换率）同样取自唯一真值来源 session.config：
+            # 这两个数字是被试最关心的两个数，此前硬编码在模板里，是两个真值源，
+            # 且不在文案一致性测试的覆盖范围内（只覆盖奖金规则）。
+            # 两个键的存在性由 oTree 保证：otree/session.py:79-87 的 clean() 把
+            # participation_fee 与 real_world_currency_per_point 列为必需键，
+            # :216-217 把 SESSION_CONFIG_DEFAULTS 合并进每个 config，故此处直接
+            # 取值——缺键应当立刻报错，而不是在页面上渲染出 None。
+            currency_per_point=amount_for_copy(
+                player.session.config['real_world_currency_per_point']
+            ),
+            participation_fee=amount_for_copy(
+                player.session.config['participation_fee']
+            ),
         )
 
 

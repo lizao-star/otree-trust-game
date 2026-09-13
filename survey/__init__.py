@@ -130,6 +130,17 @@ class DictatorGame(Page):
     form_fields = ['dictator_give']
 
     @staticmethod
+    def vars_for_template(player):
+        # 兑换率是唯一真值来源 session.config 里的数（同 trust_game 的
+        # Introduction 报酬口径），**不得**在模板里写死：这个数字一旦与配置背离，
+        # 被试读到的就是错的兑换率，而页面与测试都不会报错。
+        # 整数不带小数点（1.0 -> '1'），非整数保留真实小数（0.5 -> '0.5'），
+        # 不做四舍五入——取整会让文案与实际报酬不符。
+        rate = player.session.config['real_world_currency_per_point']
+        rate_text = str(int(rate)) if float(rate).is_integer() else str(rate)
+        return dict(currency_per_point=rate_text)
+
+    @staticmethod
     def before_next_page(player, timeout_happened):
         # 收益 = 禀赋 − 送出额，计入 participant.payoff
         player.payoff = cu(C.DICTATOR_ENDOWMENT - player.dictator_give)
