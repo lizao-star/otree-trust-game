@@ -2542,7 +2542,11 @@ echo "=== 沟通组 session（含 trust_game + survey）==="
 /share/zrs2022150501010/miniconda3/envs/otree/bin/otree test trust_communication 2>&1 | grep -cE "Bots completed session"
 ```
 
-Expected: 单元测试 `OK`；两条各输出 **1**（每个 config 各完成一次完整 session，覆盖 trust_game 与 survey 两个 app）。
+Expected: 单元测试 `OK`（**全仓共 30 个**：24 个纯函数 + 6 个分析守卫）；两条各输出 **1**（每个 config 各完成一次完整 session，覆盖 trust_game 与 survey 两个 app）。
+
+> **⚠️ 运行顺序（Task 6 收尾新增，README 必须写明）：** `analysis/test_analyze.py` 依赖生成物 `analysis/output/simulated_data.csv`。在干净 checkout 上该文件不存在，这 6 个测试会**跳过并说明原因**——全仓 `discover` 只会跑 24 个而不是 30 个。因此**须先运行 `python analysis/simulate_data.py`**。验证时请确认跳过确实带有说明信息（静默跳过是本项目反复出现的失效模式）。
+
+> **`analysis/__init__.py` 不可省：** 缺它时 `python -m unittest discover -s analysis -t .` 直接 ImportError，而全仓 `discover` 会**静默跳过**整个 `analysis/` 目录——测试数从 30 掉到 24 且不报错。
 
 - [ ] **Step 4: 端到端验收——分析管线**
 
@@ -2561,6 +2565,7 @@ Expected: 5 个 CSV + 4 个 PNG，共 9 个文件。
 ```bash
 cd /share/zrs2022150501010/project/behavioral_experiment
 for f in 实验报告.md README.md settings.py requirements.txt \
+         analysis/test_analyze.py analysis/__init__.py \
          trust_game/__init__.py trust_game/payoffs.py trust_game/content.py \
          trust_game/tests.py survey/__init__.py \
          analysis/simulate_data.py analysis/analyze.py \
