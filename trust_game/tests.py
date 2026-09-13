@@ -47,11 +47,28 @@ class PlayerBot(Bot):
         check_round(self, zero_send=zero_send)
 
 
-def baseline_round(bot, zero_send=False):
-    """基线组（communication=False）流程：无任何消息页。"""
+def comprehension_round(bot):
+    """理解检验：先提交一题错的（必须被拒），再提交全对的（必须通过）。
+
+    规格 §14.1 要求「答错时 SubmissionMustFail，答对后 comprehension_attempts
+    正确累计」。缺了前半句，「全对才能继续」这道门就没被验过：bot 永远提交正确
+    答案，即使拦截逻辑整个失效、计数器不再落库，测试也照样全绿——而报告 5.5 /
+    7.3 的预注册决定（「无需按理解度剔除」）正建立在这道门有效的前提上。
+    """
+    yield SubmissionMustFail(
+        ComprehensionCheck,
+        dict(comp_q1=0, comp_q2=12, comp_q3=12),   # 只有问题 1 答错
+        error_fields=['comp_q1'],                   # 且错误必须落在该字段上
+        check_html=False,
+    )
     yield Submission(ComprehensionCheck,
                      dict(comp_q1=10, comp_q2=12, comp_q3=12),
                      check_html=False)
+
+
+def baseline_round(bot, zero_send=False):
+    """基线组（communication=False）流程：无任何消息页。"""
+    yield from comprehension_round(bot)
     send = 0 if zero_send else 5
     if bot.player.role == C.INVESTOR_ROLE:
         yield Submission(BeliefElicit,
@@ -93,9 +110,7 @@ def communication_round(bot, zero_send=False):
     MessageReveal（此前两个 case 走的是同一条 x=10 路径，case 1 纯属重复，
     既浪费一倍运行时间，又让 x=0 在沟通组完全没有覆盖）。
     """
-    yield Submission(ComprehensionCheck,
-                     dict(comp_q1=10, comp_q2=12, comp_q3=12),
-                     check_html=False)
+    yield from comprehension_round(bot)
     # 空提交必须被拒：未勾选的 RadioSelect 根本不提交该 key，而消息字段是
     # blank=True，若不拦会在 before_next_page 的 strength_of 处抛
     # NullFieldError（HTTP 500，见 trust_game/__init__.py 的 error_message）
@@ -178,6 +193,26 @@ def check_round(bot, zero_send=False):
     # is_displayed 判定与处理组一致，并把"消息字段是否有值"作为直接后果核对。
     expect(MessageSend.is_displayed(player), is_comm)
     expect(MessageReveal.is_displayed(player), is_comm)
+
+    # ---------- 前置条件 3：角色分配顺序 ----------
+    # 规格第 12 节的实现约束：id_in_group = 1 必须是投资者。角色由 oTree 的
+    # get_roles() 按 Constants.__dict__ 的插入序分配（otree/constants.py:54-63），
+    # 故 C 中 INVESTOR_ROLE 必须先于 TRUSTEE_ROLE 定义。若两者被调换，
+    # Group.investor / Group.trustee 两个属性会随角色名一起取反，结算与配对
+    # 合并读到的是对方那一行——而按角色写的奖惩断言仍各自自洽，只有这条
+    # 「角色 → id」映射断言会失败。断言的是映射本身，故顺序调换必然被拦下。
+    expect(player.id_in_group, 1 if player.role == C.INVESTOR_ROLE else 2)
+
+    # ---------- 前置条件 4：理解检验的拦截与累计 ----------
+    # 上面的 comprehension_round 先提交了一次错答案（必须被拒），再提交全对
+    # （必须通过），故本题下该被试恰好作答 2 次：错的那次由 error_message 计入，
+    # 对的那次由 before_next_page 计入。此断言同时钉住两件事：
+    #   (a) error_message 内的一次自增**确实被 oTree 提交**（实测确认：把它改成
+    #       不自增，本断言读到的就是 1，测试立刻失败），而非被静默回滚；
+    #   (b) before_next_page 的终次自增没有丢失。
+    # 任一机制失效，报告 5.5 / 7.3 的「无需按理解度剔除」就失去依据，故这里
+    # 必须逐值断言，而不是断言 > 0。
+    expect(player.comprehension_attempts, 2)
 
     # ---------- C1：MessageReveal 必须展示「对方」的消息 ----------
     # vars_for_template 里的「我的角色 → 从对方行读哪个字段」映射若被写反，
