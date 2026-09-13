@@ -662,7 +662,9 @@ def figures(df, pairs, outdir, note):
         ax.hist(pairs[pairs.treatment == t].x, bins=bins, alpha=0.6,
                 label=label, color=color)
     ax.set_xlabel('投资者送出金额 x（点）')
-    ax.set_ylabel('对数')
+    # 纵轴是原始计数（每个柱为该组内的配对数），不是对数刻度：
+    # hist() 未对计数取对数，标成「对数」会让图自称 log 轴而实际不是。
+    ax.set_ylabel('配对数（个）')
     ax.set_title(f'投资者送出金额的分布（{int((pairs.treatment == 1).sum())}'
                  f'+{int((pairs.treatment == 0).sum())} 对）\n{note}')
     ax.legend()
@@ -675,7 +677,9 @@ def figures(df, pairs, outdir, note):
         ax.hist(pos[pos.treatment == t].return_ratio,
                 bins=np.arange(0, 1.1, 0.1), alpha=0.6, label=label, color=color)
     ax.set_xlabel('返还比例 y/(3x)')
-    ax.set_ylabel('对数')
+    # 纵轴是原始计数（每个柱为该组内的配对数），不是对数刻度：
+    # hist() 未对计数取对数，标成「对数」会让图自称 log 轴而实际不是。
+    ax.set_ylabel('配对数（个）')
     ax.set_title(f'受托人返还比例的分布（仅 x>0，N={len(pos)} 对）\n{note}')
     ax.legend()
     _save(fig, outdir, 'fig_return_ratio.png', note)
