@@ -292,3 +292,34 @@ set(REAL_TO_DEMO.values())`）后，改名与少登记都会失败。
 
 **教训**：变异探针的价值正在于此——初版守卫「看起来在守」，实测证明它什么都没守。
 只写守卫、不做探针，等于把一个空洞当成保险。
+
+## 12. 实施期新增：`analysis/test_analyze.py` 漏了一个 skip 守卫
+
+**同样是计划外发现的既有缺陷。**
+
+同步 README 测试计数时实测发现：`analysis/output/simulated_data.csv` 不存在时
+（全新检出的常态），`python -m unittest discover -t .` 的实际输出是
+
+```
+Ran 44 tests ... FAILED (errors=1, skipped=6)     退出码 1
+```
+
+而 README 与 `analysis/test_analyze.py` 自己的 docstring 都说「这 12 个用例会**跳过**
+并打印原因（不是静默跳过）」。
+
+根因：该文件只有第一个类带 `@unittest.skipUnless(os.path.exists(DATA_PATH), ...)`
+（`analysis/test_analyze.py:155`）；第二个类 `TestSourceLabelBackstop`（原 `:263`）
+**没有**，其 `setUpClass` 无条件 `pd.read_csv(DATA_PATH)` → `FileNotFoundError` → ERROR。
+查该文件全部历史（两个提交）：`skipUnless` **始终只出现 1 次**，故这是文档与代码
+从一开始就对不上，不是本次改动引入的。
+
+**修法**：给 `TestSourceLabelBackstop` 补上同样的 `@unittest.skipUnless`（正是该文件
+声明的意图）。修复后实测：
+
+| 情形 | 输出 | 退出码 |
+|---|---|---|
+| 有 csv | `Ran 50 tests ... OK` | 0 |
+| 无 csv | `Ran 50 tests ... OK (skipped=12)` | 0 |
+
+即 README 原本的描述结构重新成立，只是数字要同步为 50 / 38。
+`实验报告.md` 的三处计数（§6.1 目录清单、§6.5 测试、附录运行命令）同步更新。

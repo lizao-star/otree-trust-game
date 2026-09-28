@@ -260,6 +260,9 @@ class TestWideExportValueGuard(unittest.TestCase):
             np.sort(self.pairs_flat.x.to_numpy(dtype=float))))
 
 
+@unittest.skipUnless(os.path.exists(DATA_PATH),
+                     '需要 analysis/output/simulated_data.csv；'
+                     '请先在项目根运行 python analysis/simulate_data.py')
 class TestSourceLabelBackstop(unittest.TestCase):
     """I1 的另一半：按路径推断的「数据来源」标注必须与文件内容交叉核对。
 

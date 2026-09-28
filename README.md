@@ -75,7 +75,7 @@ conda create -n otree python=3.11.16 -y
 /share/zrs2022150501010/project/behavioral_experiment/
 ├── README.md                    本文件（交付物 5）
 ├── 实验报告.md                  实验报告（交付物 1）
-├── settings.py                  SESSION_CONFIGS：trust_baseline / trust_communication
+├── settings.py                  SESSION_CONFIGS：2 个真实 + 2 个演示（*_bots，见 §4.1）
 ├── requirements.txt             依赖清单
 ├── db.sqlite3                   oTree 默认库文件（0 字节，已被 .gitignore 排除）
 │
@@ -86,12 +86,18 @@ conda create -n otree python=3.11.16 -y
 │   ├── tests.py                 oTree bot 端到端测试（2 个 case）
 │   ├── test_payoffs.py          纯函数单元测试（13 个）
 │   ├── test_content.py          文案与常量同源测试（16 个）
+│   ├── test_settings.py         session config 守卫（6 个）
+│   ├── test_demo_templates.py   演示模板守卫：副本漂移 + 门控条件 + 键名（3 个）
 │   └── *.html                   8 个页面模板
 │
 ├── survey/                      问卷 app（个体测量）
 │   ├── __init__.py              4 页：风险偏好 / 独裁者 / 一般信任 / 人口学
 │   ├── tests.py                 oTree bot 测试（2 个 case）
 │   └── *.html                   4 个页面模板
+│
+├── _templates/                  模板覆盖（演示模式单步守卫，见 §4.1）
+│   ├── otree/Page.html          oTree Page.html 的副本，差异只有末尾守卫块
+│   └── bot_step_guard.html      单步守卫 JS（**仅机器人页面**渲染）
 │
 ├── analysis/                    模拟数据与分析管线
 │   ├── __init__.py              空文件，使 analysis 可被 unittest discover 发现
@@ -104,7 +110,9 @@ conda create -n otree python=3.11.16 -y
 │   ├── specs/2026-09-13-trust-game-design.md        设计规格（交付物 6）
 │   └── plans/2026-09-13-trust-game-implementation.md 实施计划
 │
-└── _static/global/empty.css     oTree 静态文件占位
+└── _static/global/
+    ├── empty.css                oTree 静态文件占位
+    └── step_console.html        单步演示控制台（见 §4.1）
 ```
 
 `analysis/output/` 中的文件**全部是生成物**，不随仓库分发：模拟数据、5 张表、4 张图。
@@ -125,9 +133,10 @@ otree devserver 8000
 
 启动后在浏览器打开：
 
-- **http://localhost:8000/demo** —— 演示页，列出两个 session config
-  （`信任博弈 — 基线组（无沟通）` / `信任博弈 — 沟通组`），点击任一 config 即可创建会话并
-  取得各参与者的进入链接；
+- **http://localhost:8000/demo** —— 演示页，列出四个 session config：
+  两个真实（`信任博弈 — 基线组（无沟通）` / `信任博弈 — 沟通组`）、
+  两个演示（`信任博弈 — 基线组（演示·单步）` / `…沟通组（演示·单步）`，见 §4.1）。
+  点任一 config 即可创建会话并取得各参与者的进入链接；
 - **http://localhost:8000/sessions** —— 已有会话列表；
 - **http://localhost:8000/ExportIndex** —— 数据导出入口（见第 6 节）；
 - **http://localhost:8000/rooms** —— 实验室房间（本项目 `ROOMS = []`，未使用）；
@@ -144,12 +153,54 @@ otree devserver 8000
 ctuhabar`）或管理界面按实际人数创建。**注意 `create_session` 需要可写的 sqlite**：
 在 `/share` 这个 NFS 挂载上会**卡住不返回**（不是报错），故只能在本地磁盘上执行。
 
+### 4.1 演示模式：单步控制台
+
+用于**在没有真实被试时逐页观察实验流程**。机器人被试由 oTree 内置的 browser bots
+提供，驱动脚本就是本仓库已有的 `trust_game/tests.py` 与 `survey/tests.py`——与
+`otree test` 跑的是同一份。默认情况下机器人以机器速度跑完（8 人 × 12 页约 2 秒，
+肉眼看不到过程），单步控制台把自动提交挡下来，改为按按钮驱动。
+
+1. 打开 `http://localhost:8000/demo/`，点「信任博弈 — 基线组（演示·单步）」；
+2. 从地址栏复制会话码（`/SessionStartLinks/<码>` 里的那一段）；
+3. 打开 `http://localhost:8000/static/global/step_console.html?code=<码>`；
+4. 按「**全部前进一页**」——按一次，8 人各填一页。
+
+页面上可直接看到角色分叉（投资者进 `InvestorDecision`、受托人进 `BeliefElicit`）、
+等待页、以及校验拦截（理解检验先答错被拒、再答对通过，属预期）。
+
+「连续跑完」按钮撤掉单步开关并重载，回到 2 秒自动跑完全程，用于只要数据的时候。
+
+**守卫只对机器人页面存在。** `_templates/otree/Page.html` 里那段守卫被
+`is_browser_bot` 条件包住，真实被试（该字段恒为假）拿到的 HTML 里**不含它的任何
+字节**——不是「存在但停用」。`trust_game/test_demo_templates.py` 断言该条件存在，
+`_templates/otree/Page.html` 与 oTree 原文件的差异也由该文件逐行看守。
+
+**已知行为：**
+
+- 控制台会刷出若干 `TypeError: form.on is not a function`。这是 oTree 自身注入的
+  自动提交脚本的缺陷（它在 `form.submit()` 之后调用 jQuery 的 `form.on`），无害。
+- 每次创建演示会话会随机抽一个 bot case（`normal` 或 `zero_send`，同一会话内 8 人
+  同 case）。两者**页面序列完全相同**，只是数值不同（`zero_send` 时投资者送 0、
+  受托人页无表单）。想看另一分支就重新点一次配置。
+- 演示会话是 bot 会话，**不得混进正式数据**——见「注意事项」第 11 条。
+
+---
+
 > **本机重要限制：** `/share` 是 NFS 挂载，sqlite 写入失败。`otree devserver` 与
 > `otree test` 内部强制使用**内存数据库**（`otree/main.py` 对 `devserver_inner` 与 `bots`
 > 设置 `OTREE_IN_MEMORY=1`），所以两者都能正常跑；但代价是**会话数据只在内存里，
 > 服务器一停就全部丢失**（实测：跑完 devserver 后 `db.sqlite3` 仍是 0 字节）。
 > 因此在本机上跑 devserver 时，**务必在关闭服务器之前从 `/ExportIndex` 导出数据**。
 > 正式收集数据请换到本地磁盘运行并配合 `OTREE_PRODUCTION=1`（见「注意事项」）。
+>
+> ⚠️ **补充（实测）**：上面的「不落盘」只在**不改文件**时成立。devserver 每次
+> **热重载**都会把内存库 dump 到磁盘：`otree/cli/devserver.py:65` 在监视到 `.py`
+> 文件变化时 POST `/SaveDB`，`otree/views/admin.py:633-644` 调
+> `save_sqlite_db()`，后者在内存库模式下执行
+> `sqlite_mem_conn.backup(sqlite_disk_conn)`（`otree/database.py:163-175`），
+> 且 `_dumped` 标志保证每进程只 dump 一次。实测：跑着 devserver 改一次文件，
+> `db.sqlite3` 立刻变成 168 KB 并含该进程的全部会话；不改文件则恒为 0 字节。
+> 演示模式的会话据此会出现在 `db.sqlite3` 里——见 §4.1 与「注意事项」第 11 条。
 
 ---
 
@@ -189,7 +240,7 @@ rm -f db.sqlite3
 # 分析管线的值级守卫（12 个）
 /share/zrs2022150501010/miniconda3/envs/otree/bin/python -m unittest analysis.test_analyze
 
-# 全仓（41 个）；-t . 指定项目根为顶层目录
+# 全仓（50 个）；-t . 指定项目根为顶层目录
 /share/zrs2022150501010/miniconda3/envs/otree/bin/python -m unittest discover -t .
 ```
 
@@ -200,8 +251,8 @@ rm -f db.sqlite3
 skipped '需要 analysis/output/simulated_data.csv；请先在项目根运行 python analysis/simulate_data.py'
 ```
 
-此时 `discover` 的输出是 `Ran 41 tests ... OK (skipped=12)`——**实际执行 29 个**。
-要跑满 41 个，请先执行第 7 节的 `simulate_data.py`。
+此时 `discover` 的输出是 `Ran 50 tests ... OK (skipped=12)`——**实际执行 38 个**。
+要跑满 50 个，请先执行第 7 节的 `simulate_data.py`。
 
 ---
 
@@ -319,7 +370,7 @@ cd /share/zrs2022150501010/project/behavioral_experiment
 | 6 | 设计规格 | `/share/zrs2022150501010/project/behavioral_experiment/docs/superpowers/specs/2026-09-13-trust-game-design.md` |
 | 7 | 实施计划 | `/share/zrs2022150501010/project/behavioral_experiment/docs/superpowers/plans/2026-09-13-trust-game-implementation.md` |
 
-测试合计：纯函数单元测试 29 个 + 分析管线守卫 12 个 = **41 个**（`unittest discover` 全仓）；
+测试合计：纯函数单元测试 29 个 + 分析管线守卫 12 个 + 演示模式守卫 9 个 = **50 个**（`unittest discover` 全仓）；
 另有两个 config 的 oTree bot 端到端测试。页面模板 12 个（`trust_game/` 8 个 + `survey/` 4 个）。
 
 ---
@@ -401,5 +452,14 @@ cd /share/zrs2022150501010/project/behavioral_experiment
    `trust_baseline` 与 `trust_communication` 两个 config，**没有** `survey` config。
 
 10. **`analysis/__init__.py` 是有意保留的空文件。** 删掉它会让
-    `python -m unittest discover -t .` **静默跳过**整个 `analysis/`（只跑 29 个而不是 41 个，
+    `python -m unittest discover -t .` **静默跳过**整个 `analysis/`（只跑 38 个而不是 50 个，
     且不给任何提示）。这是本项目最忌讳的"静默不发生"，故不要删除。
+
+11. **演示模式（§4.1）的会话是 bot 会话，不得混进正式数据。** 演示 config（`*_bots`）
+    跑出来的被试在导出里可识别、可过滤：`participant._is_bot` 为 1、`session.is_demo`
+    为 1。**导出后按 `participant._is_bot == 0` 过滤**，而不是依赖「记得不要在正式库上
+    跑」——devserver 会在热重载时把内存库 dump 到 `db.sqlite3`（见第 4 节末尾的补充），
+    所以演示会话确实可能落到盘上。
+    另注意：`/api/export_wide` 会**忽略 `code` 参数**、导出库中**全部**会话——想只看
+    一个会话时必须自行按 `session.code` 筛选（本机实测：请求一个演示会话的导出，
+    返回了库里全部 3 个会话的行）。
