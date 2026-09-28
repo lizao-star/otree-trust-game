@@ -14,7 +14,7 @@
   - `python -m unittest discover -s analysis -t .`：**没有它直接 ImportError**
     （Start directory is not importable）；
   - `python -m unittest discover`（全仓）：没有它时**静默跳过** `analysis/`（只跑
-    24 个其他测试），有它时才跑到本文件（30 个）。
+    43 个其他测试），有它时才跑到本文件（15 个，全仓共 58 个）。
   最后一条正是本项目最忌讳的「静默不发生」，故保留这个空文件。
 
 守卫思路（为什么不是「跑通就行」）：

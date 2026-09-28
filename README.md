@@ -1,4 +1,4 @@
-# 信任博弈实验（沟通 vs 基线）
+# 信任博弈实验（四组：沟通方向 2×2）
 
 > ⚠️ **本仓库的分析部分全部基于模拟数据。** `analysis/output/` 下的模拟数据、表格与图
 > 仅供演示分析管线可跑通，**不是真实被试的行为数据**。详见「注意事项」第 1 条与
@@ -11,21 +11,34 @@ oTree 6 实现的信任博弈（Berg, Dickhaut & McCabe, 1995）实验，含问�
 
 ## 1. 项目简介
 
-本实验研究**事前沟通（cheap talk）能否提升信任水平与可信度，以及其作用是否通过改变信念实现**。
+本实验研究**事前沟通（cheap talk）能否提升信任水平与可信度、其作用是否通过改变信念
+实现，以及沟通的「方向」是否重要**——把「有沟通 / 无沟通」的两组对比拆成
+「A 能否发 × B 能否发」的 2×2，以区分「受托人作出承诺」与「投资者表露意向」这两条
+本来被混在一起的作用路径。
 
 采用 Berg, Dickhaut & McCabe (1995) 的信任博弈范式：投资者获得 10 点禀赋，选择送出
 x 点（0 ≤ x ≤ 10），实验者乘以 3 后交给受托人，受托人选择返还 y 点（0 ≤ y ≤ 3x）；
 收益为 A = 10 − x + y、B = 3x − y，均以真实货币支付，另有 20 元出场费。
 
-**处理组设计：2 组被试间（between-subjects），由 session config 单点控制。**
+**处理组设计：4 组被试间（between-subjects），2×2 析因——投资者 A 能否发消息 ×
+受托人 B 能否发消息。由 session config 的两个布尔键单点控制。**
 
-| 条件 | session config | 操纵 |
-|---|---|---|
-| 基线组（C） | `trust_baseline` | 标准信任博弈，全程匿名，无任何沟通 |
-| 沟通组（T） | `trust_communication` | 双方在决策前同时发送预设消息、互相可见 |
+| 条件 | session config | `investor_sends_message` | `trustee_sends_message` | 操纵 |
+|---|---|---|---|---|
+| 无沟通 | `trust_none` | False | False | 标准信任博弈，全程匿名，无任何信息交流 |
+| 仅 B→A（承诺） | `trust_b_to_a` | False | True | 受托人 B 在决策前发一条承诺消息，投资者 A 只读、不能回发 |
+| 仅 A→B（意向） | `trust_a_to_b` | True | False | 投资者 A 在决策前发一条意向消息，受托人 B 只读、不能回发 |
+| 双向沟通 | `trust_both` | True | True | 双方在决策前同时发送预设消息、互相可见 |
 
-两组除消息页外使用**完全相同的代码、模板、参数与指导语结构**，处理组由
-`session.config['communication']` 单点决定（读取入口统一为 `has_communication(player)`）。
+四组除消息页外使用**完全相同的代码、模板、参数与指导语结构**（指导语按各自的
+信息结构切换一段说明，其余文案逐字相同）。处理组由 `session.config` 的
+`investor_sends_message` 与 `trustee_sends_message` 单点决定，读取入口统一为
+`trust_game/__init__.py` 里的 `investor_sends` / `trustee_sends` /
+`sends_message` / `receives_message` / `any_message`。
+
+**为什么是两个布尔键而不是一个四值字符串**：四个格子就是两个因子的四种组合，
+导出数据里两列可以直接进双因素分析；换成一个四值枚举的话，分析时得把两个因子
+再拆回来，拆错（例如把 `both` 当成只有 B 发）不会有任何报错。
 
 博弈结束后，全部被试完成问卷（风险偏好、独裁者博弈、一般信任、人口学）。
 
@@ -62,8 +75,9 @@ conda create -n otree python=3.11.16 -y
 
 > `requests` 是 `otree test` 的**隐式依赖**：未安装时 `otree test` 在第一个
 > session（`test case 0`）处即中止，把
-> "You need to install requests to run bots" 打到 **stderr** 并以**退出码 1** 结束
-> （`otree/bots/bot.py:224` 的 `sys.exit(str)`；本机实测确认），因此它**不会**
+> `You need to install requests to run bots ("pip3 install requests")`
+> 打到 **stderr** 并以**退出码 1** 结束
+> （`otree/bots/bot.py:223` 的 `sys.exit(str)`；本机实测确认），因此它**不会**
 > 输出任何 `Bots completed session`——只数 `Bots completed session` 行数而不看退出码
 > 的话，会把它误读成"检查项没跑"。`requirements.txt` 已显式包含 `requests`。
 
@@ -75,18 +89,18 @@ conda create -n otree python=3.11.16 -y
 /share/zrs2022150501010/project/behavioral_experiment/
 ├── README.md                    本文件（交付物 5）
 ├── 实验报告.md                  实验报告（交付物 1）
-├── settings.py                  SESSION_CONFIGS：2 个真实 + 2 个演示（*_bots，见 §4.1）
+├── settings.py                  SESSION_CONFIGS：4 个真实 + 4 个演示（*_bots，见 §4.1）
 ├── requirements.txt             依赖清单
-├── db.sqlite3                   oTree 默认库文件（0 字节，已被 .gitignore 排除）
+├── db.sqlite3                   oTree 默认库文件（已被 .gitignore 排除；大小随运行状态变，见 §4 末尾）
 │
 ├── trust_game/                  核心实验 app（博弈流程）
 │   ├── __init__.py              Pages / Models / creating_session
 │   ├── payoffs.py               收益与派生量计算（不依赖 oTree，可独立单测）
 │   ├── content.py               消息文案与强度编码（唯一真值来源）
-│   ├── tests.py                 oTree bot 端到端测试（2 个 case）
+│   ├── tests.py                 oTree bot 端到端测试（3 个 case，数值不随处理组变化）
 │   ├── test_payoffs.py          纯函数单元测试（13 个）
-│   ├── test_content.py          文案与常量同源测试（16 个）
-│   ├── test_settings.py         session config 守卫（6 个）
+│   ├── test_content.py          文案与常量同源 + 四组指导语互斥测试（19 个）
+│   ├── test_settings.py         session config 守卫：名字↔两个处理组键（8 个）
 │   ├── test_demo_templates.py   演示模板守卫：副本漂移 + 门控条件 + 键名（3 个）
 │   └── *.html                   8 个页面模板
 │
@@ -103,12 +117,15 @@ conda create -n otree python=3.11.16 -y
 │   ├── __init__.py              空文件，使 analysis 可被 unittest discover 发现
 │   ├── simulate_data.py         模拟数据生成（固定种子 20260913）
 │   ├── analyze.py               统计分析管线（5 表 + 4 图）
-│   ├── test_analyze.py          分析管线值级守卫（12 个用例）
+│   ├── test_analyze.py          分析管线值级守卫 + 四组导出中止守卫（15 个用例）
 │   └── output/                  产物目录；除 .gitkeep 外全部 gitignore
 │
 ├── docs/superpowers/
-│   ├── specs/2026-09-13-trust-game-design.md        设计规格（交付物 6）
-│   └── plans/2026-09-13-trust-game-implementation.md 实施计划
+│   ├── specs/2026-09-13-trust-game-design.md          设计规格（交付物 6，两组版本）
+│   ├── specs/2026-09-28-four-conditions-design.md     四组改造规格（现行设计）
+│   ├── specs/2026-09-28-demo-bots-design.md           演示模式（单步控制台）规格
+│   ├── plans/2026-09-13-trust-game-implementation.md  实施计划
+│   └── plans/2026-09-28-demo-step-console.md          演示模式实施计划
 │
 └── _static/global/
     ├── empty.css                oTree 静态文件占位
@@ -133,20 +150,31 @@ otree devserver 8000
 
 启动后在浏览器打开：
 
-- **http://localhost:8000/demo** —— 演示页，列出四个 session config：
-  两个真实（`信任博弈 — 基线组（无沟通）` / `信任博弈 — 沟通组`）、
-  两个演示（`信任博弈 — 基线组（演示·单步）` / `…沟通组（演示·单步）`，见 §4.1）。
+- **http://localhost:8000/demo** —— 演示页，列出八个 session config：四个真实
+  （`信任博弈 — 无沟通` / `…仅 B→A（承诺）` / `…仅 A→B（意向）` / `…双向沟通`）与
+  各自对应的四个演示（显示名带 `（演示·单步）`，见 §4.1）。
   点任一 config 即可创建会话并取得各参与者的进入链接；
 - **http://localhost:8000/sessions** —— 已有会话列表；
 - **http://localhost:8000/ExportIndex** —— 数据导出入口（见第 6 节）；
 - **http://localhost:8000/rooms** —— 实验室房间（本项目 `ROOMS = []`，未使用）；
 - **http://localhost:8000/server_check** —— 服务器自检。
 
-**两个 config 的说明：**
+**四个 config 的说明：**
 
-- `trust_baseline`：标准信任博弈，全程匿名、无任何沟通；被试经历 8 页（跳过消息相关 3 页）。
-- `trust_communication`：双方在决策前各自从 5 个预设选项中选一条消息、同时发送、互相可见；
-  被试经历全部 11 页。
+| config | 被试经历 | 说明 |
+|---|---|---|
+| `trust_none` | 8 页（跳过消息相关 3 页） | 标准信任博弈，全程匿名、无任何信息交流 |
+| `trust_b_to_a` | 全部 11 页 | 只有受托人进「发送消息」页，只有投资者进「对方的消息」页 |
+| `trust_a_to_b` | 全部 11 页 | 只有投资者进「发送消息」页，只有受托人进「对方的消息」页 |
+| `trust_both` | 全部 11 页 | 双方都发、都看 |
+
+页数按**页面类**计（`page_sequence` 共 11 项）：三个含消息的组里，每一类消息页至少
+对其中一方显示，故都不跳过。单个被试看到的页数会少——他只进自己那个方向的消息页。
+
+消息环节的三种判定彼此独立：`MessageSend` 只对本方的**发送者**显示，`MessageReveal`
+只对本方的**接收者**显示，`MessageWaitPage` 在有任何消息时对**全组**显示（含不发送的
+那一方）。等待页对所有人显示是时序安全的前提：接收方不进发送页、直接到等待页等，
+发送方提交后才放行，故接收方不可能在消息发出前越过等待页看到它。
 
 `num_demo_participants = 8`（每个 config），即一桌 8 人 = 4 对。真实实验时用
 `otree create_session <config> <人数>`（本机实测于可写磁盘：`Created session with code
@@ -165,16 +193,25 @@ ctuhabar`）或管理界面按实际人数创建。**注意 `create_session` 需
 
 最省事的用法是控制台：
 
-1. 打开 `http://localhost:8000/demo/`，点「信任博弈 — 基线组（演示·单步）」；
+1. 打开 `http://localhost:8000/demo/`，点一个「演示·单步」配置（四个处理组各一个）；
 2. 从地址栏复制会话码（`/SessionStartLinks/<码>` 里的那一段）；
 3. 打开 `http://localhost:8000/static/global/step_console.html?code=<码>`；
 4. 按「**全部前进一页**」——按一次，8 人各填一页。
 
-页面上可直接看到角色分叉（投资者进 `InvestorDecision`、受托人进 `BeliefElicit`）、
-等待页、以及校验拦截（理解检验先答错被拒、再答对通过，属预期）。
+页面上可直接看到角色分叉与等待页。看清每一步的**角色分叉**：`BeliefElicit` 是
+**两个角色都经过**的（只是表单字段不同），真正的角色专属页是 `InvestorDecision`
+（只有投资者）与 `TrusteeDecision`（只有受托人）——所以在投资者进 `InvestorDecision`
+的那一步，受托人停在 `DecisionWaitPage` 等；随后轮到受托人进 `TrusteeDecision`。
+另外能看到校验拦截（理解检验先答错被拒、再答对通过，属预期）。
 
-只要不想一个个点，就用控制台的「**连续跑完**」：它反复点击直到 8 人跑完全部 12 页
+只要不想一个个点，就用控制台的「**连续跑完**」：它反复点击直到 8 人跑完全程
 （几秒），再按一次可中途停止。**想只看数据不看过程时用它；它不影响守卫是否生效。**
+
+**⚠️ 起 devserver 时务必把环境的 `bin`/`Scripts` 放在 `PATH` 最前**（见第 4 节开头）。
+`otree devserver` 是**按 PATH** 重新拉起一个裸 `otree` 子进程的，不是用父进程自己。
+若本机装了多份 oTree（例如另一个 conda 环境里也有一份），子进程可能跑到**另一份**
+上去，而 `otree test` 用的是当前解释器那一份——两者行为不同时极难察觉。缺症状与
+排查手法见 `docs/superpowers/specs/2026-09-28-four-conditions-design.md` §9.2。
 
 **守卫只对机器人页面存在。** `_templates/otree/Page.html` 里那段守卫被
 `is_browser_bot` 条件包住，真实被试（该字段恒为假）拿到的 HTML 里**不含它的任何
@@ -185,9 +222,10 @@ ctuhabar`）或管理界面按实际人数创建。**注意 `create_session` 需
 
 - 控制台会刷出若干 `TypeError: form.on is not a function`。这是 oTree 自身注入的
   自动提交脚本的缺陷（它在 `form.submit()` 之后调用 jQuery 的 `form.on`），无害。
-- 每次创建演示会话会随机抽一个 bot case（`normal` 或 `zero_send`，同一会话内 8 人
-  同 case）。两者**页面序列完全相同**，只是数值不同（`zero_send` 时投资者送 0、
-  受托人页无表单）。想看另一分支就重新点一次配置。
+- 每次创建演示会话会随机抽一个 bot case（`normal` / `miss_belief` / `zero_send`，
+  同一会话内 8 人同 case）。三者**页面序列完全相同**，只是数值不同：`normal` 的预测
+  偏差恰好落在奖金容差边界上（得奖），`miss_belief` 超容差（不得奖），`zero_send`
+  时投资者送 0、受托人页无表单。想看另一分支就重新点一次配置。
 - **`otree browser_bots` 那个命令行启动器会挂住**：它等被试跑完的完成信号，而演示
   会话里的被试会停下来等人点。本项目不使用该启动器。
 - 演示会话是 bot 会话，**不得混进正式数据**——见「注意事项」第 11 条。
@@ -202,8 +240,9 @@ ctuhabar`）或管理界面按实际人数创建。**注意 `create_session` 需
 > 正式收集数据请换到本地磁盘运行并配合 `OTREE_PRODUCTION=1`（见「注意事项」）。
 >
 > ⚠️ **补充（实测）**：上面的「不落盘」只在**不改文件**时成立。devserver 每次
-> **热重载**都会把内存库 dump 到磁盘：`otree/cli/devserver.py:65` 在监视到 `.py`
-> 文件变化时 POST `/SaveDB`，`otree/views/admin.py:633-644` 调
+> **热重载**都会把内存库 dump 到磁盘：`otree/cli/devserver.py:61` 在监视到 `.py`
+> 文件变化时调 `send_termination_notice()`，后者 POST `/SaveDB`（`otree/main.py:188`），
+> `otree/views/admin.py:633-642` 的 `SaveDB.post` 调
 > `save_sqlite_db()`，后者在内存库模式下执行
 > `sqlite_mem_conn.backup(sqlite_disk_conn)`（`otree/database.py:163-175`），
 > 且 `_dumped` 标志保证每进程只 dump 一次。实测：跑着 devserver 改一次文件，
@@ -228,39 +267,54 @@ rm -f db.sqlite3
 `otree test survey` 会报 "No session config with name 'survey'"。
 
 ```bash
-/share/zrs2022150501010/miniconda3/envs/otree/bin/otree test trust_baseline
-/share/zrs2022150501010/miniconda3/envs/otree/bin/otree test trust_communication
+/share/zrs2022150501010/miniconda3/envs/otree/bin/otree test trust_none
+/share/zrs2022150501010/miniconda3/envs/otree/bin/otree test trust_b_to_a
+/share/zrs2022150501010/miniconda3/envs/otree/bin/otree test trust_a_to_b
+/share/zrs2022150501010/miniconda3/envs/otree/bin/otree test trust_both
 ```
 
-每个 config 会跑**两个 case**（`trust_game/tests.py` 的 `cases = ['normal', 'zero_send']`
-与 `survey/tests.py` 的两个 case 取最大值），因此每个命令会完整跑通**两次 session**
-（每个 case 一次），覆盖 `trust_game` + `survey` 两个 app 的全部页面；成功时输出两行
-`Bots completed session` 并以退出码 0 结束。`zero_send` case 专门覆盖 x = 0 的退化路径。
+四个 config 都要跑：**每个 config 只覆盖自己那一种页面归属**（谁发、谁看），跑一个
+不能代替另一个。
+
+每个 config 会跑**三个 case**（`trust_game/tests.py` 的 `CASES` 字典，类体里
+`cases = list(CASES)`；与 `survey/tests.py` 的 case 数取最大值），
+因此每个命令会完整跑通**三次 session**（每个 case 一次），覆盖 `trust_game` + `survey`
+两个 app 的全部页面；成功时输出三行 `Bots completed session` 并以退出码 0 结束。
+
+**case 的数值不随处理组变化**：四个组跑同一套断言，因此每个组都完整覆盖奖金的两条
+分支（`normal` 得奖、`miss_belief` 不得奖）与 x = 0 的退化路径（`zero_send`）。改造前
+是靠处理组区分的（基线送 5、沟通送 10），四组下那样写就要维护四套期望值，且每组只
+覆盖一半分支。代价是每个 config 约 9 秒。
 
 任一会话未被跑通（如第 0 个 case 失败）都会**中止并给出非零退出码**，不会静默跳过。
 
 ### 5.2 纯函数单元测试与全仓测试
 
 ```bash
-# 纯函数单元测试：收益函数、返还比例、信念奖金、消息强度映射、文案同源（29 个）
+# 纯函数单元测试：收益函数、返还比例、信念奖金、消息强度映射、文案同源（32 个）
 /share/zrs2022150501010/miniconda3/envs/otree/bin/python -m unittest trust_game.test_payoffs trust_game.test_content
 
-# 分析管线的值级守卫（12 个）
+# 分析管线的值级守卫 + 四组导出中止守卫（15 个）
 /share/zrs2022150501010/miniconda3/envs/otree/bin/python -m unittest analysis.test_analyze
 
-# 全仓（50 个）；-t . 指定项目根为顶层目录
+# 全仓（58 个）；-t . 指定项目根为顶层目录
 /share/zrs2022150501010/miniconda3/envs/otree/bin/python -m unittest discover -t .
 ```
 
-**⚠️ 顺序要求：`analysis/test_analyze.py` 依赖 `analysis/output/simulated_data.csv`。**
-在全新检出上该文件不存在，这 12 个用例会**跳过并打印原因**（不是静默跳过）：
+**⚠️ 顺序要求：`analysis/test_analyze.py` 的 15 个用例里有 12 个依赖
+`analysis/output/simulated_data.csv`。** 在全新检出上该文件不存在，这 12 个用例会
+**跳过并打印原因**（不是静默跳过）：
 
 ```
 skipped '需要 analysis/output/simulated_data.csv；请先在项目根运行 python analysis/simulate_data.py'
 ```
 
-此时 `discover` 的输出是 `Ran 50 tests ... OK (skipped=12)`——**实际执行 38 个**。
-要跑满 50 个，请先执行第 7 节的 `simulate_data.py`。
+此时 `discover` 的输出是 `Ran 58 tests ... OK (skipped=12)`——**实际执行 46 个**。
+要跑满 58 个，请先执行第 7 节的 `simulate_data.py`。
+
+（四组导出中止守卫那 3 个用例**不**依赖模拟数据：它们用一张最小宽表自建输入，
+为的是在「刚改完实验、还没有任何数据」的场景下也能跑——那正是这道守卫最该被验证
+的时候。）
 
 ---
 
@@ -273,23 +327,42 @@ skipped '需要 analysis/output/simulated_data.csv；请先在项目根运行 py
    导出的是宽表 `all_apps_wide.csv`（每被试一行）。
 2. **bot 数据导出（测试用）**：`otree test` 加 `--export` 参数，把 bot 跑出的数据存盘。
    ```bash
-   /share/zrs2022150501010/miniconda3/envs/otree/bin/otree test trust_baseline 60 --export /tmp/exp_baseline
+   /share/zrs2022150501010/miniconda3/envs/otree/bin/otree test trust_none 60 --export /tmp/exp_none
    ```
    产物目录含 `all_apps_wide.csv`、`trust_game.csv`、`survey.csv`。
+
+   **⚠️ 导出的行数 = 人数 × case 数，不是人数。** `otree test` 会为**每个 case 各建
+   一个 session**，而 `--export` 在循环结束后导出**库里全部 session**（`otree/bots/runner.py`
+   的导出分支不带 `session_code`）。本项目 3 个 case，所以 `60` 会得到 **3 × 60 = 180 行**。
+   本机实测：`otree test <config> 8 --export` 的 `trust_game.csv` 是 **24 行**（= 3 × 8），
+   而不是 8 行。因此 bot 导出**只适合验证管线形状**，不要拿它当某个处理组的样本量。
 3. **分析用宽表**：`analysis/analyze.py --data <上述 all_apps_wide.csv>`（见第 7 节）。
 
 > `otree zip` **不是数据导出命令**。在 oTree 6 中它把项目打包成 `.otreezip` 用于部署，
 > 且需要交互式回答依赖文件问题，与本项目的数据导出无关。
 
-**处理组标识：** 宽表 CSV 中的字段 **`trust_game.1.player.is_communication`** 即处理组标识
-（1 = 沟通组，0 = 基线组）。该字段由 `creating_session` 从
-`session.config['communication']` 降范式写入每个 Player，使每份导出数据**自包含**——不需要
-按 `session.code` 做跨表关联就能分辨处理组。宽表中同时保留原始配置列
-`session.config.communication`，两者在同一 session 内必然一致。
+**处理组标识：** 宽表 CSV 中的两个字段即 2×2 的两个因子——
+
+| 列 | 含义 |
+|---|---|
+| `trust_game.1.player.investor_sends_message` | 投资者 A 能否发消息（1/0） |
+| `trust_game.1.player.trustee_sends_message` | 受托人 B 能否发消息（1/0） |
+
+两个字段由 `creating_session` 从 `session.config` 的同名键降范式写入每个 Player，使每份
+导出数据**自包含**——不需要按 `session.code` 做跨表关联就能分辨处理组。宽表中同时保留
+原始配置列 `session.config.investor_sends_message` / `session.config.trustee_sends_message`，
+四者在同一 session 内必然一致。
+
+> ⚠️ **`analysis/analyze.py` 目前仍是「两组」版本，会拒绝四组导出。**
+> 它的处理组是**单列** 0/1（`df['treatment'] = df['is_communication'].astype(int)`），
+> 全管线约二十处按它二元切分；四组数据喂进去会把四个格子**静默压成两组**、表照出图照画。
+> 故 `load()` 在读到 `investor_sends_message` / `trustee_sends_message` 时立即中止并点名
+> 越界列（退出码 1，不写任何产物）。改成 2×2 之前，四组数据只能先做描述统计。
+> 中止逻辑与理由见规格 §7。
 
 > 只跑了单个 config 的导出（单臂）做不了任何组间比较。`analysis/analyze.py` 会在**落盘之前**
-> 检测到这种情况并以明确信息中止（退出码 1，产物目录一个字节都不写）。需要两个 config 的
-> `all_apps_wide` 合并后才能分析。
+> 检测到这种情况并以明确信息中止（退出码 1，产物目录一个字节都不写）。需要全部四个 config
+> 的 `all_apps_wide` 合并后才能分析。
 
 ---
 
@@ -354,7 +427,7 @@ cd /share/zrs2022150501010/project/behavioral_experiment
 `--data` 指向真实导出时，脚本会自动利用宽表结构完成**配对合并**（x 只在投资者行、y 只在
 受托人行，故凡同时使用 x 与 y 的模型都先合并成"每对一行"再估计）。
 
-**第 3 步：跑分析测试**（依赖第 1 步的产物；12 个用例）
+**第 3 步：跑分析测试**（依赖第 1 步的产物；15 个用例，其中 3 个不依赖产物）
 
 ```bash
 /share/zrs2022150501010/miniconda3/envs/otree/bin/python -m unittest analysis.test_analyze
@@ -378,8 +451,9 @@ cd /share/zrs2022150501010/project/behavioral_experiment
 | 6 | 设计规格 | `/share/zrs2022150501010/project/behavioral_experiment/docs/superpowers/specs/2026-09-13-trust-game-design.md` |
 | 7 | 实施计划 | `/share/zrs2022150501010/project/behavioral_experiment/docs/superpowers/plans/2026-09-13-trust-game-implementation.md` |
 
-测试合计：纯函数单元测试 29 个 + 分析管线守卫 12 个 + 演示模式守卫 9 个 = **50 个**（`unittest discover` 全仓）；
-另有两个 config 的 oTree bot 端到端测试。页面模板 12 个（`trust_game/` 8 个 + `survey/` 4 个）。
+测试合计：纯函数单元测试 32 个 + 分析管线守卫 15 个 + 演示模式与 config 守卫 11 个
+= **58 个**（`unittest discover` 全仓）；另有四个 config 的 oTree bot 端到端测试
+（每个 3 个 case）。页面模板 12 个（`trust_game/` 8 个 + `survey/` 4 个）。
 
 ---
 
@@ -456,11 +530,12 @@ cd /share/zrs2022150501010/project/behavioral_experiment
    "Please delete your database"。本机 `db.sqlite3` 常常以 0 字节形式重新出现，属正常现象
    且已被 gitignore，不需要处理。
 
-9. **`otree test` 的参数是 session config 名，不是 app 名。** 本项目只有
-   `trust_baseline` 与 `trust_communication` 两个 config，**没有** `survey` config。
+9. **`otree test` 的参数是 session config 名，不是 app 名。** 本项目有四个真实 config
+   （`trust_none` / `trust_b_to_a` / `trust_a_to_b` / `trust_both`）与四个演示 config
+   （各加 `_bots` 后缀），**没有** `survey` config。
 
 10. **`analysis/__init__.py` 是有意保留的空文件。** 删掉它会让
-    `python -m unittest discover -t .` **静默跳过**整个 `analysis/`（只跑 38 个而不是 50 个，
+    `python -m unittest discover -t .` **静默跳过**整个 `analysis/`（只跑 43 个而不是 58 个，
     且不给任何提示）。这是本项目最忌讳的"静默不发生"，故不要删除。
 
 11. **演示模式（§4.1）的会话是 bot 会话，不得混进正式数据。** 演示 config（`*_bots`）
@@ -468,6 +543,14 @@ cd /share/zrs2022150501010/project/behavioral_experiment
     为 1。**导出后按 `participant._is_bot == 0` 过滤**，而不是依赖「记得不要在正式库上
     跑」——devserver 会在热重载时把内存库 dump 到 `db.sqlite3`（见第 4 节末尾的补充），
     所以演示会话确实可能落到盘上。
-    另注意：`/api/export_wide` 会**忽略 `code` 参数**、导出库中**全部**会话——想只看
-    一个会话时必须自行按 `session.code` 筛选（本机实测：请求一个演示会话的导出，
-    返回了库里全部 3 个会话的行）。
+    另注意：`/api/export_wide` 的会话参数名是 **`session_code`**，**不是 `code`**
+    （`otree/views/export.py:39` 只读 `query_params.get('session_code')`）。写 `code=`
+    会被静默忽略，于是 `otree/export.py:216-219` 走 else 分支、导出库中**全部**会话。
+    本机实测：带 `?code=<演示会话码>` 请求，返回了库里全部 3 个会话的行。想只看一个
+    会话，要么用 `?session_code=<码>`，要么自行按 `session.code` 筛选。
+
+12. **四组数据目前跑不了分析管线，这是有意的。** `analysis/analyze.py` 仍是两组版本
+    （处理组 = 单列 0/1），读到四组导出会立即中止并点名越界列。它**不会**静默把四个
+    格子压成两组——那正是这道守卫存在的理由。要分析四组数据，需先把处理组改为两个
+    因子；主效应与交互作用各用什么检验口径属于分析计划的决定（等你定稿），见规格 §7。
+    实测：中止信息里会列出 `trust_game.1.player.investor_sends_message` 等列名。
