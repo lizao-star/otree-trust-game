@@ -182,7 +182,13 @@ def check_round(bot, zero_send=False):
     expect(is_comm, player.session.config.get('communication', False))
     # session config 名是独立的真值来源：沟通组的该字段必须是 True 本身，
     # 而非碰巧为真的值。
-    if player.session.config['name'] == 'trust_communication':
+    # 演示 config 的名字是「对应真实 config 名 + _bots」，故先归一再比对，
+    # 使这条核对对两组 config 同样成立。**不要**改回精确匹配——
+    # trust_communication_bots 会落进 else 分支、被当成基线组要求
+    # is_communication 为假，沟通组的演示会话会直接 500。
+    # 该命名约定由 trust_game/test_settings.py 的
+    # test_demo_config_names_follow_the_bots_suffix_convention 钉住。
+    if player.session.config['name'].removesuffix('_bots') == 'trust_communication':
         expect(is_comm, True)
     else:
         expect(is_comm, False)

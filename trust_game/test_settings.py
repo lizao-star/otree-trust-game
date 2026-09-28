@@ -92,6 +92,34 @@ class TestDemoConfigs(unittest.TestCase):
                 f'{demo_name} 的 communication 与 {real_name} 不一致',
             )
 
+    def test_demo_config_names_follow_the_bots_suffix_convention(self):
+        """演示 config 名必须是「对应真实 config 名 + `_bots`」，一个不多一个不少。
+
+        这不是取名偏好，而是 trust_game/tests.py 的**依赖**：那里的 check_round
+        用 `name.removesuffix('_bots')` 归一后再与 'trust_communication' 比较，
+        以核对「config 名 ↔ communication 键」是否自洽。名字不符合该约定
+        （例如叫 trust_communication_bots_v2），那条核对会静默走错分支——
+        沟通组被当成基线组要求 is_communication 为假，演示会话直接 500。
+
+        断言写成「集合相等」而不是「逐个检查以 _bots 结尾的名字」：后者有个
+        已实测到的空洞——把 config 改名成 trust_communication_bots_v2 之后，
+        它不再以 _bots 结尾，于是**根本不会进入被检查的集合**，测试照样全绿。
+        集合相等把「改名」和「少登记」都变成失败。
+        """
+        names = set(self.configs)
+        bots_names = {n for n in names if n.endswith('_bots')}
+        self.assertEqual(
+            bots_names, set(REAL_TO_DEMO.values()),
+            'settings.py 里以 _bots 结尾的 config 必须恰好是 REAL_TO_DEMO 列出的'
+            '那些。少了/多了/改了名，trust_game/tests.py 的名字归一核对就会'
+            '走错分支，沟通组的演示会话会直接 500',
+        )
+        for real_name, demo_name in REAL_TO_DEMO.items():
+            self.assertEqual(
+                demo_name, real_name + '_bots',
+                f'演示 config 名必须等于 {real_name!r} + "_bots"，实际 {demo_name!r}',
+            )
+
     def test_demo_configs_mirror_app_sequence(self):
         for real_name, demo_name in REAL_TO_DEMO.items():
             self.assertEqual(
