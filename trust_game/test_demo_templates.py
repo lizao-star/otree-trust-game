@@ -68,5 +68,24 @@ class TestPageOverride(unittest.TestCase):
         )
 
 
+# 与 _templates/bot_step_guard.html 和 _static/global/step_console.html
+# 两处出现的 sessionStorage 键名必须逐字相同——这是两处真值源，
+# 改一处而漏改另一处，守卫就永远读不到控制台设的开关（静默失效）。
+CONSOLE_HTML = PROJECT_ROOT / '_static' / 'global' / 'step_console.html'
+GUARD_HTML = PROJECT_ROOT / '_templates' / 'bot_step_guard.html'
+STEP_STORAGE_KEY = 'otree_bot_step'
+
+
+class TestStepStorageKey(unittest.TestCase):
+
+    def test_key_is_identical_in_guard_and_console(self):
+        for path in (GUARD_HTML, CONSOLE_HTML):
+            self.assertIn(
+                f"'{STEP_STORAGE_KEY}'", path.read_text(encoding='utf-8'),
+                f'{path.name} 里没有出现键名 {STEP_STORAGE_KEY!r}；'
+                '守卫与控制台必须用同一个键，否则开关不生效且不报错',
+            )
+
+
 if __name__ == '__main__':
     unittest.main()

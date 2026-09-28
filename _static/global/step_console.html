@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>单步演示控制台</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 13px/1.5 system-ui, "Microsoft YaHei", sans-serif; }
+  #bar { position: sticky; top: 0; z-index: 10; background: #fff;
+         border-bottom: 1px solid #ccc; padding: 8px 12px;
+         display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  #bar h1 { font-size: 14px; margin: 0 8px 0 0; }
+  button { padding: 5px 12px; cursor: pointer; }
+  #step-all { font-weight: 700; padding: 7px 18px; }
+  #code { padding: 5px 8px; width: 140px; }
+  #status { color: #666; margin-left: auto; }
+  #grid { display: grid; gap: 6px; padding: 6px; }
+  .cell { border: 1px solid #ccc; border-radius: 4px; overflow: hidden;
+          display: flex; flex-direction: column; height: calc(50vh - 34px); }
+  .cell .bar { display: flex; gap: 6px; align-items: center;
+               padding: 3px 6px; border-bottom: 1px solid #ccc; font-size: 12px; }
+  .cell iframe { flex: 1; width: 100%; border: 0; }
+  .page-name { font-family: ui-monospace, Consolas, monospace; color: #0a5; }
+  .cell button { padding: 2px 8px; font-size: 12px; }
+</style>
+</head>
+<body>
+<div id="bar">
+  <h1>单步演示控制台</h1>
+  <input id="code" placeholder="会话码">
+  <button id="load">加载</button>
+  <button id="step-all">全部前进一页</button>
+  <button id="run-all">连续跑完</button>
+  <span id="status"></span>
+</div>
+<div id="grid"></div>
+
+<script>
+// 与 _templates/bot_step_guard.html 里的键名必须逐字相同；
+// trust_game/test_demo_templates.py 会断言两处一致。
+const STEP_KEY = 'otree_bot_step';
+
+const grid = document.getElementById('grid');
+const statusEl = document.getElementById('status');
+let frames = [];     // [{ iframe, nameEl }]
+let stepCount = 0;
+
+function setStatus(text) { statusEl.textContent = text; }
+
+async function load(code) {
+  if (!code) { setStatus('请填会话码'); return; }
+  // 必须在创建 iframe **之前**设置：同源 iframe 共享本标签页的 sessionStorage，
+  // 守卫在页面解析时就会读它。
+  sessionStorage.setItem(STEP_KEY, '1');
+  setStatus('正在读取会话 ' + code + ' …');
+
+  const resp = await fetch('/SessionStartLinks/' + code);
+  if (!resp.ok) { setStatus('读不到会话页：HTTP ' + resp.status); return; }
+  const doc = new DOMParser().parseFromString(await resp.text(), 'text/html');
+  const urls = [...doc.querySelectorAll('a.participant-link')].map(a => a.href);
+  if (!urls.length) { setStatus('该会话没有被试链接（会话码对吗？）'); return; }
+
+  grid.textContent = '';
+  grid.style.gridTemplateColumns = 'repeat(' + Math.ceil(urls.length / 2) + ', 1fr)';
+  frames = urls.map((url, i) => {
+    const cell = document.createElement('div');
+    cell.className = 'cell';
+    const bar = document.createElement('div');
+    bar.className = 'bar';
+    const label = document.createElement('span');
+    label.textContent = 'P' + (i + 1);
+    const nameEl = document.createElement('span');
+    nameEl.className = 'page-name';
+    nameEl.textContent = '…';
+    const btn = document.createElement('button');
+    btn.textContent = '前进';
+    const frame = { iframe: null, nameEl: nameEl };
+    btn.addEventListener('click', () => { step(frame); setTimeout(refreshNames, 700); });
+    bar.append(label, nameEl, btn);
+    const iframe = document.createElement('iframe');
+    iframe.src = url;
+    frame.iframe = iframe;
+    cell.append(bar, iframe);
+    grid.append(cell);
+    return frame;
+  });
+  setStatus('已加载 ' + urls.length + ' 个被试');
+  setTimeout(refreshNames, 800);
+}
+
+// 让一个被试前进一页：点他页面上的原生提交按钮。
+// 机器人的答案已在服务端排队（GET 该页时入队），所以点下去用的是机器人的答案。
+function step(frame) {
+  const doc = frame.iframe.contentDocument;
+  if (!doc) return false;
+  const form = doc.querySelector('#form');
+  // 与 oTree 自己找提交按钮的口径一致：<button> 且 type != 'button'
+  // （oTree 的提交按钮无 type 属性，默认即 submit）。
+  const btn = [...doc.querySelectorAll('#form button, #form input[type=submit]')]
+    .find(el => el.getAttribute('type') !== 'button');
+  if (!form || !btn) return false;   // 等待页没有表单，由 oTree 自行跳转
+
+  // 下面两件都必须做，否则点击无声失效（均已实测）：
+  // 1) 机器人的答案不预填在表单里，字段是 required 且空的，不关掉约束校验
+  //    就会被浏览器挡下，POST 根本发不出去；
+  // 2) oTree 每次提交后把 .otree-btn-next 禁用 5000ms 防连点
+  //    （otree/static/otree/js/common_user_facing.js:26-38）。
+  form.noValidate = true;
+  btn.disabled = false;
+  btn.click();
+  return true;
+}
+
+function stepAll() {
+  let hit = 0;
+  for (const f of frames) if (step(f)) hit++;
+  stepCount += 1;
+  setStatus('已下发第 ' + stepCount + ' 步（命中 ' + hit + ' 个）');
+  setTimeout(refreshNames, 700);
+}
+
+function refreshNames() {
+  for (const f of frames) {
+    try {
+      const parts = f.iframe.contentWindow.location.pathname.split('/');
+      f.nameEl.textContent = parts[parts.length - 2] || '?';
+    } catch (e) {
+      f.nameEl.textContent = '?';
+    }
+  }
+}
+
+// 撤掉单步开关并重载，回到机器人自动跑完（约 2 秒跑完全部 12 页）。
+function runAll() {
+  sessionStorage.removeItem(STEP_KEY);
+  stepCount = 0;
+  setStatus('已撤掉单步开关，重载中……');
+  for (const f of frames) {
+    try { f.iframe.contentWindow.location.reload(); } catch (e) {}
+  }
+  setTimeout(refreshNames, 3000);
+}
+
+document.getElementById('load').addEventListener('click', () => {
+  load(document.getElementById('code').value.trim());
+});
+document.getElementById('step-all').addEventListener('click', stepAll);
+document.getElementById('run-all').addEventListener('click', runAll);
+document.getElementById('code').addEventListener('keydown', e => {
+  if (e.key === 'Enter') load(e.target.value.trim());
+});
+
+const fromQuery = new URLSearchParams(location.search).get('code');
+if (fromQuery) {
+  document.getElementById('code').value = fromQuery;
+  load(fromQuery);
+}
+</script>
+</body>
+</html>
