@@ -44,6 +44,8 @@
 | F11 | 点击前必须 `form.noValidate = true`，否则被 HTML5 校验挡下（机器人答案在服务端排队，不预填在表单里，字段是 `required` 且空的） | 实测：不设时点击无效、卡死 |
 | F12 | 点击前必须解除按钮禁用，oTree 每次提交后禁用 `.otree-btn-next` 5000ms | `otree/static/otree/js/common_user_facing.js:26-38`；实测 2.5s 间隔点击无效 |
 | F13 | 提交按钮是 `<button class="otree-btn-next btn btn-primary">下一页</button>`，**无 `type` 属性**（默认即 submit） | 实测 DOM |
+| F14 | **devserver 每次热重载都会把内存库 dump 到 `db.sqlite3`**：`otree/cli/devserver.py:65` 在文件变化时 POST `/SaveDB`，`otree/views/admin.py:633-644` 调 `save_sqlite_db()`，后者在 `IN_MEMORY` 时执行 `sqlite_mem_conn.backup(sqlite_disk_conn)`（`otree/database.py:163-175`），且 `_dumped` 保证每进程只 dump 一次。实测：跑 devserver 期间改文件 → 库变成 168 KB 且含全部演示会话；不改文件 → 恒 0 字节 |
+| F15 | 沟通组演示会话在 `trust_game` 结束时 **HTTP 500** | 实测：`tests.py` 的 `check_round` 用 config **名**精确匹配 `'trust_communication'`，`trust_communication_bots` 落进 else 分支、被要求 `is_communication` 为假。已修（见 §11） |
 
 ## 3. 机制
 
@@ -221,7 +223,8 @@ README 的目录结构、测试计数与注意事项都是**带具体数字**的
 | 控制台报错（F8） | oTree 自身缺陷，约 116 条/次，无害；README 写明以免被误当故障 |
 | case 随机 | 每次创建演示会话随机抽 `normal` 或 `zero_send`（`otree/bots/browser.py:55`，同一会话内 8 人同 case）。两者**页面序列相同**，仅数值不同（`zero_send` 时送 0、受托人页无表单）。想看另一分支重新点一次配置。要固定 case 需走 REST（`otree/views/rest.py:266` 接受 `case_number`）另写脚本，**本规格不做** |
 | 改用 devserver 前不要改代码 | devserver 自动重载会清空进程内的 `browser_bot_worker`，页面报 `Bot for Participant ... not loaded`（`otree/bots/browser.py:28`） |
-| 演示会话会写库 | NFS 部署机上 devserver 强制内存库、数据不落盘（README 注意事项第 6 条）；可写磁盘上会真实落库，此时必须靠 §9 的列过滤 |
+| 演示会话会写库 | devserver 运行期间用的是内存库，但**每次热重载都会把它 dump 到 `db.sqlite3`**——实测触发路径见 §2 的 F14。故不得依赖「devserver 不落盘」，一律靠 §9 的列过滤 |
+| `/SessionStartLinks` 需可访问 | 控制台靠它取被试链接。演示模式下该页免登录（`otree/urls.py` 的 `UNRESTRICTED_IN_DEMO_MODE`）；`OTREE_PRODUCTION=1` 后需管理员登录，属预期 |
 | 覆盖范围有限 | 演示只覆盖 bot 会走的路径；**演示通过 ≠ 实验无缺陷** |
 
 ## 10. 验证方式
@@ -238,3 +241,54 @@ README 的目录结构、测试计数与注意事项都是**带具体数字**的
 4. **硬约束回归（最重要）**：新建一个**真实** config 的会话，取其任一被试页面 HTML，
    断言其中**不含** `HTMLFormElement.prototype.submit`、不含 `otree_bot_step`。
    此项是对 §1 硬约束的直接证据。
+
+### 10.1 实施结果（2026-09-28 全部执行完毕）
+
+| 验证项 | 结果 |
+|---|---|
+| §10.1 `unittest discover` | 50 个全绿（41 → 50：config 守卫 6 + 模板守卫 3） |
+| §10.2 变异探针 | 6 条全部命中正确用例，撤销后全绿（见 §6.3 与 §11） |
+| §10.3 基线组单步 6 步 | `Introduction → ComprehensionCheck（先拒后过）→ BeliefElicit → 角色分叉 → 等待页 → Results` |
+| §10.3 沟通组单步 | 出现 `MessageSend`（含空提交被拒）与 `MessageReveal` |
+| §10.3「连续跑完」 | 两组均 8 人全部到 `OutOfRangeNotification`，无 500 |
+| §10.4 硬约束回归 | 真实被试页不含守卫 JS、不含键名、不含守卫注释 |
+| `otree test` 不回归 | 两个真实 config 各 2 个 case 全部 `Bots completed session` |
+
+**实施期发现的计划外缺陷**：见 §11（沟通组演示会话 500）。
+
+## 11. 实施期新增：沟通组演示会话的 500（F15）
+
+**这是计划外发现的既有缺陷，由本功能暴露。**
+
+`trust_game/tests.py` 的 `check_round` 用 config **名**做一次「名字 ↔
+`communication` 键」的交叉核对：
+
+```python
+if player.session.config['name'] == 'trust_communication':   # 精确匹配
+    expect(is_comm, True)
+else:
+    expect(is_comm, False)
+```
+
+新加的 `trust_communication_bots` 不等于 `'trust_communication'`，于是落进 `else`
+分支、被要求 `is_communication` 为假——而它正确地为真，于是 bot 断言炸出 500，
+**沟通组的演示会话在 `trust_game` 结束时卡死**。基线组侥幸躲过（`else` 分支的期望
+恰好与基线相符），所以问题只在沟通组显现。
+
+**修法**：先归一再比对，保住这条独立核对：
+
+```python
+if player.session.config['name'].removesuffix('_bots') == 'trust_communication':
+```
+
+配套守卫 `test_settings.py::test_demo_config_names_follow_the_bots_suffix_convention`
+把「演示 config 名 = 对应真实 config 名 + `_bots`」变成受测断言。
+
+**守卫写法的返工**（留档）：初版写成「逐个检查以 `_bots` 结尾的名字，断言其去后缀后
+是一个已存在的 config」。变异探针实测发现它有空洞——把 config 改名成
+`trust_communication_bots_v2` 之后，它不再以 `_bots` 结尾，**根本不会进入被检查的
+集合**，测试照样全绿。改为断言**集合相等**（`{以 _bots 结尾的名字} ==
+set(REAL_TO_DEMO.values())`）后，改名与少登记都会失败。
+
+**教训**：变异探针的价值正在于此——初版守卫「看起来在守」，实测证明它什么都没守。
+只写守卫、不做探针，等于把一个空洞当成保险。
