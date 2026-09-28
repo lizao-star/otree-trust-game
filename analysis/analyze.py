@@ -165,6 +165,52 @@ REQUIRED_FIELDS = (
     'econ_courses',
 )
 
+# 四组设计（2×2 沟通方向）导出的处理组字段名。
+#
+# ⚠️ 本管线仍是「沟通组 vs 基线组」的两组版本：处理组是**单列** 0/1
+# （见 load() 里的 df['treatment'] = df['is_communication'].astype(int)，
+# 全管线约二十处按它二元切分）。实验侧已改为四组，而本管线自己说不出这个
+# 原因，表现为两条都不好走的路径：
+#
+#   1. 真实四组导出里**没有** is_communication 列（四组改造已把该字段删掉），
+#      于是撞上的是 REQUIRED_FIELDS 那条「数据缺少本管线必需的字段：
+#      is_communication……若这是单 app 导出，请改用宽表」——两处都指错了方向：
+#      这**就是**宽表，缺的也不是导出方式，而是本管线本身还没适配四组。
+#      按这句话去查，会一路查到导出设置上。
+#   2. 更要命的一条：只要数据里**有**一列 is_communication（手工补的，或
+#      将来某个导出又带上它），本管线就照常算出 treatment，把四个格子压成
+#      两组——表照出、图照画、p 值照报，问题不以任何形式暴露。
+#
+# 故在读入之后立刻按原列名显式拦下，把原因说清楚。
+#
+# 注：_rename_otree_export **不会**丢掉这两个列（不在 FIELD_SOURCE 里的列
+# 保留原列名走过那一步），所以放在它前后都查得到；放在前面是为了让报错顺序
+# 更合理（见 _refuse_four_condition_export 的 docstring）。
+FOUR_CONDITION_COLUMNS = ('investor_sends_message', 'trustee_sends_message')
+
+
+def _refuse_four_condition_export(df):
+    """四组导出一律中止，并说明原因。
+
+    在 load() 里紧跟 pd.read_csv 调用，**早于** REQUIRED_FIELDS 的缺列检查：
+    否则真实四组导出会先撞上「缺少 is_communication」那条指错方向的报错
+    （见 FOUR_CONDITION_COLUMNS 的说明）。
+    列名用**子串**匹配而非全等：宽表里的名字形如
+    `trust_game.1.player.investor_sends_message`。
+    """
+    hits = sorted({col for col in df.columns
+                   if any(key in col for key in FOUR_CONDITION_COLUMNS)})
+    if hits:
+        raise SystemExit(
+            '这份导出带有四组设计（2×2 沟通方向）的处理组字段：'
+            + '、'.join(hits)
+            + '。本分析管线仍是「沟通组 vs 基线组」的两组版本，'
+              '它的 treatment 是单列 0/1，继续跑会把四个格子静默压成两组、'
+              '照常出表出图，而问题不会以任何形式暴露出来。故在此中止。'
+              '要分析四组数据，需先把本管线的处理组改为两个因子；'
+              '主效应与交互作用各用什么检验口径，属于分析计划的决定，'
+              '须先定稿再改本文件。')
+
 
 # --------------------------------------------------------------------------
 # 读入与配对合并
@@ -318,6 +364,9 @@ def load(path):
     # float_precision='round_trip'：pandas 默认解析器会丢最后 1 ulp，
     # 后续与磁盘值做精确比较时会得到假的不一致。
     df = pd.read_csv(path, float_precision='round_trip')
+    # 紧跟读入、早于其他检查：真实四组导出缺 is_communication 列，不先拦下的
+    # 话，报出来的会是那条指错方向的缺列错误（见 FOUR_CONDITION_COLUMNS）
+    _refuse_four_condition_export(df)
     df = _rename_otree_export(df)
 
     missing = [f for f in REQUIRED_FIELDS if f not in df.columns]

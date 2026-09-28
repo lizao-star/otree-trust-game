@@ -6,9 +6,13 @@ from . import payoffs
 doc = """
 信任博弈实验（Berg, Dickhaut & McCabe, 1995）。
 
-处理组由 session config 的 communication 键控制：
-  False = 基线组（无沟通）
-  True  = 沟通组（双方决策前同时发送预设消息并互相可见）
+处理组是 2×2 析因，由 session config 的**两个布尔键**控制：
+  investor_sends_message = A（投资者）能否给 B 发一条意向消息
+  trustee_sends_message  = B（受托人）能否给 A 发一条承诺消息
+
+四格：
+  都 False = 无沟通      仅 trustee = B→A 单向（承诺）
+  仅 investor = A→B 单向  都 True  = 双向（决策前同时发送、互相可见）
 """
 
 
@@ -30,9 +34,51 @@ class C(BaseConstants):
     TRUSTEE_MESSAGES = content.TRUSTEE_MESSAGES
 
 
-def has_communication(player):
-    """处理组判定：唯一的读取入口。"""
-    return player.session.config.get('communication', False)
+# ---------------------------------------------------------------------------
+# 处理组的读取入口。全部经此，不在别处直接读 config。
+#
+# `.get(key, False)` 里的默认值是**必需**的，不是防御性写法：
+# trust_game/test_content.py 用只带报酬两个键的桩 config 渲染指导语，
+# 缺键时必须退化为「无沟通」而不是抛 KeyError。
+# ---------------------------------------------------------------------------
+
+def investor_sends(player):
+    """A（投资者）能否给 B 发消息。"""
+    return player.session.config.get('investor_sends_message', False)
+
+
+def trustee_sends(player):
+    """B（受托人）能否给 A 发消息。"""
+    return player.session.config.get('trustee_sends_message', False)
+
+
+def sends_message(player):
+    """本方是不是**发送方**——决定 MessageSend 是否显示。"""
+    if player.role == C.INVESTOR_ROLE:
+        return investor_sends(player)
+    return trustee_sends(player)
+
+
+def receives_message(player):
+    """本方是不是**接收方**——决定 MessageReveal 是否显示。
+
+    ⚠️ 它与 sends_message 不是互补关系，而是 2×2 的两个独立维度：
+    双向组里两者同为真，无沟通组里两者同为假，两个单向组里一真一假。
+    不要把它当成 `not sends_message(player)` 的简写。
+    """
+    if player.role == C.INVESTOR_ROLE:
+        return trustee_sends(player)
+    return investor_sends(player)
+
+
+def any_message(player):
+    """本组是否存在消息环节——决定等待页是否显示。
+
+    等待页对**组内所有人**显示（含不发送的那一方），这是时序安全的前提：
+    接收方不进 MessageSend 而直接到等待页，发送方提交后才放行，故接收方
+    不可能在发送方提交之前越过等待页看到消息。
+    """
+    return investor_sends(player) or trustee_sends(player)
 
 
 def amount_for_copy(value):
@@ -51,7 +97,7 @@ class Subsession(BaseSubsession):
 
 
 def creating_session(subsession: Subsession):
-    """把处理组标识降范式写入每个 Player，使导出数据自包含。
+    """把两个处理组因子降范式写入每个 Player，使导出数据自包含。
 
     ！！必须是模块级函数，不要改写成 Subsession 的类方法 ！！
 
@@ -62,14 +108,16 @@ def creating_session(subsession: Subsession):
     run_creating_session_functions 执行
     getattr(target, 'creating_session', None)（otree/session.py:453），
     在模块上只能找到模块级函数：若写成类方法，getattr 返回 None，
-    本函数被静默跳过，player.is_communication 恒为 NULL —— 依赖它的
-    分派逻辑（如沟通组 bot）会走错分支而假通过，而不会报错。
+    本函数被静默跳过，两个字段恒为 NULL —— 依赖它们的页面分派逻辑
+    （谁发消息、谁看消息）会走错分支而假通过，而不会报错。
     这正是 oTree 自带模板的写法（otree/assets/app_template_trials/__init__.py）。
-    trust_game/tests.py 中的断言会在该字段为 None 时立刻失败，以防回归。
+    trust_game/tests.py 中的断言会在任一字段为 None 时立刻失败，以防回归。
     """
-    is_comm = subsession.session.config.get('communication', False)
+    investor = subsession.session.config.get('investor_sends_message', False)
+    trustee = subsession.session.config.get('trustee_sends_message', False)
     for player in subsession.get_players():
-        player.is_communication = is_comm
+        player.investor_sends_message = investor
+        player.trustee_sends_message = trustee
 
 
 class Group(BaseGroup):
@@ -83,7 +131,11 @@ class Group(BaseGroup):
 
 
 class Player(BasePlayer):
-    is_communication = models.BooleanField()
+    # 处理组标识：2×2 的两个因子，取自 session.config 的同名键，由上面的
+    # creating_session 降范式写入。两个字段都是**组级**的（同组两人相同），
+    # 因为处理组在 session 层面分配。
+    investor_sends_message = models.BooleanField()
+    trustee_sends_message = models.BooleanField()
 
     # 理解检验
     comprehension_attempts = models.IntegerField(initial=0)
@@ -142,7 +194,10 @@ class Introduction(Page):
     def vars_for_template(player):
         return dict(
             is_investor=player.role == C.INVESTOR_ROLE,
-            is_communication=has_communication(player),
+            # 消息环节的两种角色。四个组合（都真/只发/只收/都假）对应指导语
+            # 里四段互斥的说明，见 Introduction.html。
+            sends_message=sends_message(player),
+            receives_message=receives_message(player),
             endowment=C.ENDOWMENT,
             multiplier=C.MULTIPLIER,
             max_return=C.MULTIPLIER * C.ENDOWMENT,
@@ -195,7 +250,13 @@ class MessageSend(Page):
 
     @staticmethod
     def is_displayed(player):
-        return has_communication(player)
+        # 本方是发送方才经过本页。单向组里接收方跳过它、直接到等待页。
+        return sends_message(player)
+
+    @staticmethod
+    def vars_for_template(player):
+        # 本页只有发送方会看到，故「对方是否也发」等价于「本方是否也收」。
+        return dict(other_also_sends=receives_message(player))
 
     @staticmethod
     def get_form_fields(player):
@@ -205,7 +266,7 @@ class MessageSend(Page):
 
     @staticmethod
     def error_message(player, values):
-        # 消息字段是 blank=True（基线组不经过本页，字段合法为空），oTree 因此
+        # 消息字段是 blank=True（未经过本页的被试该字段合法为空），oTree 因此
         # 不会加 InputRequired；而未选中的单选组根本不会提交该键，values 里
         # 连 key 都没有。所以必须在这里按角色显式拒绝空选择，并给出中文提示，
         # 否则 before_next_page 读取空字段会抛 NullFieldError（HTTP 500）。
@@ -232,13 +293,14 @@ class MessageSend(Page):
 class MessageWaitPage(WaitPage):
     @staticmethod
     def is_displayed(player):
-        return has_communication(player)
+        return any_message(player)
 
 
 class MessageReveal(Page):
     @staticmethod
     def is_displayed(player):
-        return has_communication(player)
+        # 本方是接收方才经过本页。单向组里发送方发完即走，看不到任何消息。
+        return receives_message(player)
 
     @staticmethod
     def vars_for_template(player):

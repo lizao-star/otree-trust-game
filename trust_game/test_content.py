@@ -12,7 +12,7 @@ from otree.templating.loader import FileLoader
 
 from survey import C as SURVEY_C, DictatorGame
 
-from trust_game import C, Introduction, content, payoffs
+from trust_game import C, Introduction, MessageSend, content, payoffs
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SETTINGS_PY = PROJECT_ROOT / 'settings.py'
@@ -206,6 +206,119 @@ class TestIntroductionDisclosure(unittest.TestCase):
         )
         self.assertIn(
             f'另有 {plain_amount(terms["participation_fee"])} 元出场费', html)
+
+
+class TestMessageConditionCopy(unittest.TestCase):
+    """四组指导语互斥，且各自说清「谁能给谁发」。
+
+    四种情形共用同一个模板，靠 sends_message / receives_message 两个标志分支
+    （trust_game/Introduction.html）。分支写错的后果是**被试读到的规则与实际
+    经历的页面对不上**：例如两个单向组的措辞写反，A→B 组的被试会以为自己不能
+    发送、于是干等对方的回信。而四个 config 都照样跑通、bot 测试也全绿——
+    没有任何运行时报错。故四段话必须逐段钉住：本情形那段出现，另外三段不出现。
+
+    渲染走 vars_for_template 的真实路径（配置键 → 读取函数 → 模板上下文），
+    而不是手工往上下文里塞两个布尔值：后者会绕过 sends_message /
+    receives_message 的角色映射，而那正是最容易写反的地方（投资者与受托人
+    在两个单向组里的处境正好互换）。
+    """
+
+    BOTH = '双方都能看到对方的消息'
+    SENDER_ONLY = '对方无法向你发送消息'
+    RECEIVER_ONLY = '你无法向对方发送任何消息'
+    NEITHER = '不会有任何信息交流'
+
+    ALL_FOUR = (BOTH, SENDER_ONLY, RECEIVER_ONLY, NEITHER)
+
+    def _render_intro(self, investor_sends, trustee_sends, role):
+        config = dict(shipped_session_config_defaults(),
+                      investor_sends_message=investor_sends,
+                      trustee_sends_message=trustee_sends)
+        ctx = Introduction.vars_for_template(
+            _stub_player(role, config=config))
+        template = FileLoader(PROJECT_ROOT).load('trust_game/Introduction.html')
+        return str(template.render(ctx, strict_mode=True))
+
+    def test_each_condition_shows_exactly_one_paragraph(self):
+        """四种情形各自只出现对应那一段，另外三段都不出现。
+
+        逐格列举而不是只测两端：中间两格（两个单向组）才是新写的分支，
+        两端在改造前就已存在。
+        """
+        investor, trustee = C.INVESTOR_ROLE, C.TRUSTEE_ROLE
+        # (投资者能否发, 受托人能否发, 被试角色, 该被试应读到的那段)
+        cases = [
+            (False, False, investor, self.NEITHER),
+            (False, False, trustee, self.NEITHER),
+            (True, True, investor, self.BOTH),
+            (True, True, trustee, self.BOTH),
+            # 仅 B→A：B 是发送方，A 是接收方
+            (False, True, trustee, self.SENDER_ONLY),
+            (False, True, investor, self.RECEIVER_ONLY),
+            # 仅 A→B：A 是发送方，B 是接收方
+            (True, False, investor, self.SENDER_ONLY),
+            (True, False, trustee, self.RECEIVER_ONLY),
+        ]
+        for investor_sends, trustee_sends, role, expected in cases:
+            with self.subTest(investor_sends=investor_sends,
+                              trustee_sends=trustee_sends, role=role):
+                html = self._render_intro(investor_sends, trustee_sends, role)
+                self.assertIn(expected, html)
+                for other in self.ALL_FOUR:
+                    if other != expected:
+                        self.assertNotIn(
+                            other, html,
+                            f'四段说明必须互斥：{role} 在 '
+                            f'(investor={investor_sends}, '
+                            f'trustee={trustee_sends}) 下除了「{expected}」'
+                            f'还读到了「{other}」——被试因此无法确定'
+                            '自己处在哪一种信息结构里')
+
+    def test_message_send_page_states_the_same_direction_as_intro(self):
+        """发消息页与指导语必须同一口径：单向组的发送方在页面上也读得到
+        「对方无法向你发送消息」，否则他发完会一直等回信。"""
+        def render(receives):
+            ctx = MessageSend.vars_for_template(_stub_player(
+                C.INVESTOR_ROLE,
+                config=shipped_session_config_defaults()))
+            ctx['other_also_sends'] = receives   # 显式覆盖，避免读真实配置
+            ctx['form'] = []
+            template = FileLoader(PROJECT_ROOT).load('trust_game/MessageSend.html')
+            return str(template.render(ctx, strict_mode=True))
+
+        both = render(receives=True)
+        self.assertIn('双方都能看到对方的选择', both)
+        self.assertNotIn(self.SENDER_ONLY, both)
+
+        one_way = render(receives=False)
+        self.assertIn(self.SENDER_ONLY, one_way)
+        self.assertNotIn('双方都能看到对方的选择', one_way)
+
+    def test_vars_for_template_reports_the_two_dimensions(self):
+        """两个标志必须来自配置键，且角色映射方向正确。
+
+        这是上一条的**下界**：即使模板分支全对，只要 sends/receives 的
+        角色映射写反（把「A 发」映射到受托人），四组的行为就会整体错位。
+        """
+        investor, trustee = C.INVESTOR_ROLE, C.TRUSTEE_ROLE
+
+        def flags(role, investor_sends, trustee_sends):
+            config = dict(shipped_session_config_defaults(),
+                          investor_sends_message=investor_sends,
+                          trustee_sends_message=trustee_sends)
+            ctx = Introduction.vars_for_template(
+                _stub_player(role, config=config))
+            return ctx['sends_message'], ctx['receives_message']
+
+        # 仅 B 发：投资者只收、受托人只发
+        self.assertEqual(flags(investor, False, True), (False, True))
+        self.assertEqual(flags(trustee, False, True), (True, False))
+        # 仅 A 发：正好相反
+        self.assertEqual(flags(investor, True, False), (True, False))
+        self.assertEqual(flags(trustee, True, False), (False, True))
+        # 两端：两个维度同真 / 同假
+        self.assertEqual(flags(investor, True, True), (True, True))
+        self.assertEqual(flags(investor, False, False), (False, False))
 
 
 class TestSurveyCopyDisclosure(unittest.TestCase):

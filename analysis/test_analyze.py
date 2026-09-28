@@ -55,6 +55,109 @@ SETTINGS_PY = os.path.join(PROJECT_ROOT, 'settings.py')
 GAME_APP = 'trust_game'          # 博弈字段的唯一来源
 SURVEY_APP = 'survey'            # 问卷字段的唯一来源
 
+# ⚠️ 本管线的契约是**四组改造之前**的两组宽表格式：处理组由单列
+# `is_communication` 表示（analyze.py 的 REQUIRED_FIELDS 里有它，
+# treatment 也由它算出），而四组改造引入的两个因子列不在契约内。
+#
+# 于是下面构造宽表夹具时要做两件看似矛盾的事，两件都是必需的：
+#   - **排除** FOUR_CONDITION_FIELDS：app 源码里已有这两个字段，
+#     夹具会扫到它们；带着它们喂进 load() 会被守卫中止（那是正确行为，
+#     见 TestFourConditionExportIsRefused）。
+#   - **补回** LEGACY_TREATMENT_FIELD：四组改造把 app 里的该字段删了，
+#     夹具扫不到它；不补的话 load() 会以「缺少 is_communication」中止。
+# 两者都不是权宜之计：夹具模拟的就是本管线能消费的那一种导出。
+LEGACY_TREATMENT_FIELD = 'is_communication'
+FOUR_CONDITION_FIELDS = ('investor_sends_message', 'trustee_sends_message')
+
+
+def four_condition_frame():
+    """最小宽表：只含守卫触发所需的列。
+
+    刻意不走 build_wide_fixture——那个夹具依赖 analysis/output/simulated_data.csv，
+    而本用例要能在全新检出（尚未生成模拟数据）上运行：守卫最该被验证的场景
+    恰恰是「刚改完实验、还没有任何数据」，那时它若是跳过的就等于没守。
+    列名用**子串**能对上的完整宽表形式，以便与真实导出一致。
+    """
+    return pd.DataFrame({
+        'participant.code': ['p1', 'p2'],
+        'session.code': ['s1', 's1'],
+        f'{GAME_APP}.1.player.role': ['Investor', 'Trustee'],
+        f'{GAME_APP}.1.player.{LEGACY_TREATMENT_FIELD}': [0, 0],
+        f'{GAME_APP}.1.player.{FOUR_CONDITION_FIELDS[0]}': [0, 0],
+        f'{GAME_APP}.1.player.{FOUR_CONDITION_FIELDS[1]}': [1, 1],
+    })
+
+
+class TestFourConditionExportIsRefused(unittest.TestCase):
+    """四组导出必须中止，且**报错要指向真实原因**。
+
+    本管线的处理组是单列 0/1。四组数据的两个因子列不进 FIELD_SOURCE，
+    于是谁都不读它们；treatment 仍由 is_communication 算出——只要那一列
+    存在，四个格子就被压成两组，表照出、图照画、p 值照报。而真实四组导出
+    里那一列**不存在**（四组改造已把该字段删掉），所以实际撞上的会是
+    REQUIRED_FIELDS 的缺列报错，它把原因说成「请改用宽表导出」——方向错的
+    报错比不报错更费时间。两道防线各管一头，本类把两者都钉住。
+    """
+
+    def _tmp_csv(self, df):
+        tmpdir = tempfile.mkdtemp(prefix='four_condition_')
+        self.addCleanup(shutil.rmtree, tmpdir, ignore_errors=True)
+        path = os.path.join(tmpdir, 'four_condition_wide.csv')
+        df.to_csv(path, index=False, encoding='utf-8-sig')
+        return path
+
+    def test_load_refuses_four_condition_export(self):
+        analyze = _load_analyze_module()
+        path = self._tmp_csv(four_condition_frame())
+        with self.assertRaises(SystemExit) as ctx:
+            analyze.load(path)
+        message = str(ctx.exception)
+        # 报错必须点出是哪几列越界：只说「数据不对」会让人去查别的方向
+        for key in FOUR_CONDITION_FIELDS:
+            self.assertIn(key, message, f'报错未指明越界列 {key}：{message}')
+
+    def test_guard_fires_before_the_misleading_missing_field_error(self):
+        """守卫必须早于 REQUIRED_FIELDS 的缺列检查，否则报错指向错误方向。
+
+        真实四组导出没有 is_communication 列，故去掉守卫后先撞上的是那条
+        「数据缺少本管线必需的字段：is_communication……若这是单 app 导出，
+        请改用宽表」——而这份数据**就是**宽表，缺的也不是导出方式。
+        顺序错了不会有任何功能差异（两道检查都会中止），差别全在报错内容上，
+        所以只有这条断言能钉住它。
+        """
+        analyze = _load_analyze_module()
+        frame = four_condition_frame().drop(
+            columns=[f'{GAME_APP}.1.player.{LEGACY_TREATMENT_FIELD}'])
+        path = self._tmp_csv(frame)
+        with self.assertRaises(SystemExit) as ctx:
+            analyze.load(path)
+        message = str(ctx.exception)
+        self.assertIn(FOUR_CONDITION_FIELDS[0], message,
+                      f'报错没点出四组字段，说明不是这道守卫拦下的：{message}')
+        self.assertNotIn('缺少本管线必需的字段', message,
+                         f'缺列检查抢先报了错（方向是错的）：{message}')
+
+    def test_rename_step_leaves_them_untouched_but_unused(self):
+        """重命名既不会丢掉这两个列，也不会把它们接进管线。
+
+        实测（本用例即是）：不在 FIELD_SOURCE 里的列**保留原列名**走过
+        _rename_otree_export——`continue` 跳过的是「改名」，不是「这一列」。
+        这与「会被静默丢弃」的直觉相反，写在这里以免后来者据此把守卫挪走。
+        真正的问题在下一步：treatment 仍由单列 is_communication 算出，
+        两个因子列没有任何消费者——这才是「四组被压成两组」的来源，也是
+        本管线必须整体改造、光加一列不够的原因。
+        """
+        analyze = _load_analyze_module()
+        renamed = analyze._rename_otree_export(four_condition_frame())
+        joined = ' '.join(renamed.columns)
+        for key in FOUR_CONDITION_FIELDS:
+            self.assertIn(key, joined, f'{key} 应当原样留在帧里')
+            self.assertNotIn(key, analyze.FIELD_SOURCE,
+                             f'{key} 竟然进了 FIELD_SOURCE——那本管线的处理组'
+                             '就不再是单列 0/1 了，本类的两条断言都要重写')
+        # 对照：契约内的处理组列被改成了短名，说明重命名确实在工作
+        self.assertIn(LEGACY_TREATMENT_FIELD, joined)
+
 
 def _load_analyze_module():
     """按路径加载被测模块（不依赖 cwd，也不依赖 analysis 是否为包）。"""
@@ -126,6 +229,11 @@ def build_wide_fixture(sim, apps, builtins):
       - `trust_game` 的 role 为 Investor/Trustee、group.id_in_subsession 为真实组号。
     正是这个「同名不同义」让 FIELD_SOURCE 的 app 定向成为必需：取错 app 会静默塌成
     一对/空角色，所以夹具必须如实复现它，否则守卫是假的。
+
+    **本夹具模拟的是四组改造之前的两组格式**（本管线的契约，见
+    LEGACY_TREATMENT_FIELD 的说明）：排除四组改造引入的两个因子列，
+    补回改造中删掉的处理组列。两处调整都不是权宜之计——带着四组列喂进
+    load() 会被守卫中止，那是正确行为，另有用例专门验证。
     """
     pair_index = sim.pair_id.astype('category').cat.codes + 1
     wide = pd.DataFrame(index=sim.index)
@@ -147,8 +255,16 @@ def build_wide_fixture(sim, apps, builtins):
                 else:
                     wide[col] = 0
         for field in app_custom_fields(app):
+            if field in FOUR_CONDITION_FIELDS:
+                # app 源码里有这两个字段，但本夹具模拟的是两组格式（见 docstring）
+                continue
             wide[f'{app}.1.player.{field}'] = (
                 sim[field].values if field in sim.columns else np.nan)
+    # 补回两组时代的处理组列：四组改造把 app 里的该字段删了，夹具扫不到它，
+    # 而 load() 的 REQUIRED_FIELDS 仍要求它。只补博弈 app 那一份——
+    # 与真实导出一致（FIELD_SOURCE 也把该字段定向到 trust_game）。
+    wide[f'{GAME_APP}.1.player.{LEGACY_TREATMENT_FIELD}'] = (
+        sim[LEGACY_TREATMENT_FIELD].values)
     return wide
 
 
