@@ -36,22 +36,32 @@
 <div id="grid"></div>
 
 <script>
-// 与 _templates/bot_step_guard.html 里的键名必须逐字相同；
-// trust_game/test_demo_templates.py 会断言两处一致。
-const STEP_KEY = 'otree_bot_step';
-
+// ⚠️ 这里**不得**再引入任何 opt-in 开关（曾经用过 sessionStorage）。守卫现在
+// 无条件生效，无论从哪个入口打开 bot 页面都会停下来等点击；控制台只负责
+// 「一次点完 8 个」和「连着点」。见 _templates/bot_step_guard.html 与规格 §13。
 const grid = document.getElementById('grid');
 const statusEl = document.getElementById('status');
-let frames = [];     // [{ iframe, nameEl }]
+let frames = [];     // [{ iframe, nameEl, lastClick }]
 let stepCount = 0;
+let autoTimer = null;
+let autoTicks = 0;
+
+// 两次点击之间的最小间隔（毫秒）。oTree 提交后会把按钮禁用 5 秒防连点，
+// 我们会解开它；这个间隔是替代品，防止同一页被重复 POST。
+const CLICK_GAP_MS = 600;
+const AUTO_INTERVAL_MS = 300;
+const AUTO_MAX_TICKS = 150;
 
 function setStatus(text) { statusEl.textContent = text; }
 
+function currentPath(frame) {
+  try { return frame.iframe.contentWindow.location.pathname; }
+  catch (e) { return null; }
+}
+
 async function load(code) {
   if (!code) { setStatus('请填会话码'); return; }
-  // 必须在创建 iframe **之前**设置：同源 iframe 共享本标签页的 sessionStorage，
-  // 守卫在页面解析时就会读它。
-  sessionStorage.setItem(STEP_KEY, '1');
+  stopAuto(null);
   setStatus('正在读取会话 ' + code + ' …');
 
   const resp = await fetch('/SessionStartLinks/' + code);
@@ -74,7 +84,7 @@ async function load(code) {
     nameEl.textContent = '…';
     const btn = document.createElement('button');
     btn.textContent = '前进';
-    const frame = { iframe: null, nameEl: nameEl };
+    const frame = { iframe: null, nameEl: nameEl, lastClick: 0 };
     btn.addEventListener('click', () => { step(frame); setTimeout(refreshNames, 700); });
     bar.append(label, nameEl, btn);
     const iframe = document.createElement('iframe');
@@ -91,6 +101,8 @@ async function load(code) {
 // 让一个被试前进一页：点他页面上的原生提交按钮。
 // 机器人的答案已在服务端排队（GET 该页时入队），所以点下去用的是机器人的答案。
 function step(frame) {
+  const now = Date.now();
+  if (now - frame.lastClick < CLICK_GAP_MS) return false;   // 刚点过，等它导航
   const doc = frame.iframe.contentDocument;
   if (!doc) return false;
   const form = doc.querySelector('#form');
@@ -108,6 +120,7 @@ function step(frame) {
   form.noValidate = true;
   btn.disabled = false;
   btn.click();
+  frame.lastClick = now;
   return true;
 }
 
@@ -130,15 +143,38 @@ function refreshNames() {
   }
 }
 
-// 撤掉单步开关并重载，回到机器人自动跑完（约 2 秒跑完全部 12 页）。
+// 「连续跑完」：由控制台反复点击驱动，直到 8 人都到 OutOfRangeNotification。
+// 不再依赖「撤掉某个开关」——守卫是无条件生效的，没有开关可撤。
 function runAll() {
-  sessionStorage.removeItem(STEP_KEY);
-  stepCount = 0;
-  setStatus('已撤掉单步开关，重载中……');
-  for (const f of frames) {
-    try { f.iframe.contentWindow.location.reload(); } catch (e) {}
+  if (autoTimer) { stopAuto('已停止'); return; }
+  if (!frames.length) { setStatus('先加载会话'); return; }
+  autoTicks = 0;
+  autoTimer = setInterval(autoTick, AUTO_INTERVAL_MS);
+  autoTick();
+}
+
+function autoTick() {
+  autoTicks += 1;
+  if (autoTicks > AUTO_MAX_TICKS) {
+    stopAuto('连续跑完超时——可能有页面报错，请看各 iframe 的内容');
+    return;
   }
-  setTimeout(refreshNames, 3000);
+  let remaining = 0;
+  for (const f of frames) {
+    const p = currentPath(f);
+    if (p && p.includes('OutOfRangeNotification')) continue;   // 这个已跑完
+    remaining += 1;
+    step(f);
+  }
+  if (remaining === 0) { stopAuto('8 人已全部跑完（改会话码点「加载」可重来）'); return; }
+  setStatus('连续跑完中……剩余 ' + remaining + ' 人（再按一次可停止）');
+  refreshNames();
+}
+
+function stopAuto(msg) {
+  if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+  if (msg) setStatus(msg);
+  refreshNames();
 }
 
 document.getElementById('load').addEventListener('click', () => {

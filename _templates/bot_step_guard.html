@@ -2,15 +2,19 @@
    player.participant.is_browser_bot 为真时 include —— 真实被试的页面
    不含本文件的任何字节（trust_game/test_demo_templates.py 钉住该条件）。
 
-   按下「全部前进一页」的控制台页会先设好 sessionStorage 开关再创建 iframe；
-   同源 iframe 共享同一标签页的 sessionStorage，故此处读得到。
-   开关不在的场合（例如直接打开 oTree 演示页的 Grid view）守卫不生效，
-   机器人照旧自动跑完——那是「连续跑完」的默认行为。 #}
+   **无条件生效。** bot 页面上不存在「自动跑完」这条路径：无论从哪个入口打开
+   （单步控制台、会话页的 Grid view、split-screen、单个被试链接），页面都会停
+   下来等人点「下一页」。要一次跑完就用控制台的「连续跑完」，它靠反复点击驱动。
+
+   ⚠️ 不要在这里引入任何 opt-in 开关（曾经用过一个会话级存储标志，只有控制台页
+   会设它）。后果是走 Grid view 时守卫完全不生效、8 个机器人 2 秒跑完，而且该
+   标志在同一标签页里是粘住的，同一个 URL 会因之前访问过什么而行为不同。
+   trust_game/test_demo_templates.py 的 test_no_opt_in_switch_in_guard_or_console
+   会拦下重新引入。详见 docs/superpowers/specs/2026-09-28-demo-bots-design.md §13。 #}
 <script>
 (function () {
-    if (sessionStorage.getItem('otree_bot_step') !== '1') return;
     // oTree 在每个页面末尾追加一段自动提交脚本（otree/views/abstract.py:501-513），
-    // 内容是 form.submit()。把它覆盖成空操作，页面就会停下来等控制台的按钮。
+    // 内容是 form.submit()。把它覆盖成空操作，页面就会停下来等点击。
     // 人类点页面上的「下一页」走的是原生表单提交，不经过 HTMLFormElement.prototype.submit，
     // 因此照常工作；而机器人下一次要提交的答案在页面被 GET 时就已在服务端排队
     // （otree/views/abstract.py:494），所以点下去用的就是机器人的答案。

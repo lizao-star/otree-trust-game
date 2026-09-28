@@ -68,22 +68,34 @@ class TestPageOverride(unittest.TestCase):
         )
 
 
-# 与 _templates/bot_step_guard.html 和 _static/global/step_console.html
-# 两处出现的 sessionStorage 键名必须逐字相同——这是两处真值源，
-# 改一处而漏改另一处，守卫就永远读不到控制台设的开关（静默失效）。
 CONSOLE_HTML = PROJECT_ROOT / '_static' / 'global' / 'step_console.html'
 GUARD_HTML = PROJECT_ROOT / '_templates' / 'bot_step_guard.html'
-STEP_STORAGE_KEY = 'otree_bot_step'
 
 
-class TestStepStorageKey(unittest.TestCase):
+class TestGuardIsUnconditional(unittest.TestCase):
+    """守卫必须在 bot 页面上**无条件**生效——不得引入任何 opt-in 开关。
 
-    def test_key_is_identical_in_guard_and_console(self):
+    返工记录（规格 §13）：初版用一个 `sessionStorage` 开关做 opt-in，且只有
+    控制台页会设它。后果是：从会话页的 **Grid view**、split-screen 或单个被试
+    链接打开时开关不存在，守卫完全不生效，8 个机器人 2 秒全部跑完——用户实际
+    就是这么踩到的。更糟的是该开关在同一标签页里是**粘住**的，于是同一个 URL
+    的行为取决于此前在这个标签页里访问过什么（实测：先开控制台再开 Grid view
+    会「看起来正常」，换个标签页就复现）。
+
+    本用例把「不许再引入任何形式的开关」钉住：守卫与控制台里都不许出现
+    `sessionStorage`。加了它就等于把「静默变回自动跑完」这条路重新打开。
+    """
+
+    def test_no_opt_in_switch_in_guard_or_console(self):
+        # 匹配 `sessionStorage.`（带点），也就是真正的调用写法
+        # （setItem / getItem / removeItem）。刻意不匹配光秃秃的关键词：
+        # 两份文件里都有**说明为什么不能用它**的注释，那些散文不该让用例变红。
         for path in (GUARD_HTML, CONSOLE_HTML):
-            self.assertIn(
-                f"'{STEP_STORAGE_KEY}'", path.read_text(encoding='utf-8'),
-                f'{path.name} 里没有出现键名 {STEP_STORAGE_KEY!r}；'
-                '守卫与控制台必须用同一个键，否则开关不生效且不报错',
+            self.assertNotIn(
+                'sessionStorage.', path.read_text(encoding='utf-8'),
+                f'{path.name} 里出现了 sessionStorage 调用：守卫一旦依赖 opt-in '
+                '开关，未经控制台打开的 bot 页面（如 Grid view）会静默变回自动'
+                '跑完，详见规格 §13',
             )
 
 

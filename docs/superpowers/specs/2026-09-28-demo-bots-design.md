@@ -88,15 +88,18 @@ _templates/otree/Page.html
 `_static/global/step_console.html?code=<会话码>`，一个自建静态页（我们完全拥有，
 不覆盖任何 oTree 模板）：
 
-1. 设 `sessionStorage.otree_bot_step = '1'`，然后才创建 iframe（同源 iframe 共享
-   同一标签页的 sessionStorage）；
-2. 从 `/SessionStartLinks/<code>` 取 8 个被试链接（演示模式下该页免登录，
+1. 从 `/SessionStartLinks/<code>` 取 8 个被试链接（演示模式下该页免登录，
    `otree/urls.py` 的 `UNRESTRICTED_IN_DEMO_MODE`）；
-3. 每个被试一个 iframe + 当前页名 + 单独的「前进」按钮；
-4. 一个「**全部前进一页**」按钮（主操作）：对每个 iframe 依次
+2. 每个被试一个 iframe + 当前页名 + 单独的「前进」按钮；
+3. 一个「**全部前进一页**」按钮（主操作）：对每个 iframe 依次
    `form.noValidate = true` → 解除按钮禁用（F12）→ 点击提交；
-5. 一个「**连续跑完**」按钮：清掉 `sessionStorage` 开关并重载 iframe，回到 F1 的
-   2 秒自动跑完（用于只要数据、不看过程的时候）。
+4. 一个「**连续跑完**」按钮：由控制台以 `setInterval` 反复点击驱动，直到 8 人都到
+   `OutOfRangeNotification`（每帧最小点击间隔 600ms、上限 150 次，再按一次可停止）。
+
+> **控制台不是守卫的前提。** 守卫在 bot 页面上**无条件生效**（§13），所以从会话页的
+> Grid view、split-screen 或单个被试链接打开同样会停下来等人点——控制台只是把
+> 「一次点 8 个」和「连着点」包成了按钮。第 2 版曾用 `sessionStorage` 做 opt-in，
+> 已被否证，见 §13。
 
 ## 4. 文件清单
 
@@ -107,7 +110,7 @@ _templates/otree/Page.html
 | 3 | `_templates/bot_step_guard.html` | 新增 | 守卫 JS，唯一真值来源 |
 | 4 | `_static/global/step_console.html` | 新增 | 控制台页 |
 | 5 | `trust_game/test_settings.py` | 新增 | session config 守卫（§6.1） |
-| 6 | `trust_game/test_demo_templates.py` | 新增 | 模板副本漂移守卫 + 常量一致性（§6.2） |
+| 6 | `trust_game/test_demo_templates.py` | 新增 | 模板副本漂移守卫 + 门控条件 + 无条件生效（§6.2） |
 | 7 | `README.md` | 改 | 见 §8 |
 
 ### 4.1 演示 config 的字段
@@ -165,15 +168,19 @@ otree devserver 8000
 2. **守卫的准入条件是 `is_browser_bot`**：断言 `_templates/otree/Page.html` 里那段
    `{% if %}` 的条件文本包含 `is_browser_bot`。这是 §1 硬约束的第一道证据——
    条件一旦被改成恒真或改成别的字段，本用例失败。
-3. **`sessionStorage` 键名两处逐字相同**：`_templates/bot_step_guard.html` 与
-   `_static/global/step_console.html` 各有一份该键名，是两处真值源，用测试钉住；
-   只改其中一处（守卫读的键与控制台写的键不再匹配）必须失败。
+3. **守卫是无条件的**：断言 `_templates/bot_step_guard.html` 与
+   `_static/global/step_console.html` 里都**没有 `sessionStorage.` 调用**。
+   重新引入 opt-in 开关等于把「Grid view 静默变回 2 秒跑完」这条路打开，见 §13。
+
+> 第 2 版这里是「断言两处 `sessionStorage` 键名逐字相同」。该用例随开关一起删除——
+> 它守的东西已不存在，而它守不住的正是真正的故障（见 §13）。
 
 ### 6.3 证伪性
 
 每条守卫都必须**能被改坏**：把 `use_browser_bots=True` 加到 `trust_baseline`、把
-`_templates/otree/Page.html` 与 oTree 版的差异改成别的、把守卫或控制台里的
-`sessionStorage` 键名改掉——都必须让对应用例失败。实现时会逐条做变异探针并记录。
+`_templates/otree/Page.html` 与 oTree 版的差异改成别的、把守卫的准入条件改成恒真、
+把演示 config 改成不符合命名约定、给守卫或控制台重新引入 `sessionStorage.` 调用——
+都必须让对应用例失败。实现时会逐条做变异探针并记录。
 
 ## 7. 已否证的做法（留档，避免重走）
 
@@ -323,3 +330,52 @@ Ran 44 tests ... FAILED (errors=1, skipped=6)     退出码 1
 
 即 README 原本的描述结构重新成立，只是数字要同步为 50 / 38。
 `实验报告.md` 的三处计数（§6.1 目录清单、§6.5 测试、附录运行命令）同步更新。
+
+## 13. 实施后返工：守卫改为无条件生效（用户实测踩到）
+
+**这是用户实际使用后报告的缺陷，不是推断出来的。**
+
+### 13.1 现象与根因
+
+用户点开演示配置、在会话页按了 **Grid view** 的 Launch，结果 8 个机器人**2 秒跑完**，
+完全没有停下来等点击；而按 §4 的步骤走控制台则一切正常。
+
+根因：守卫的生效被做成 **opt-in** —— 它读一个 `sessionStorage` 标志，而**只有控制台页
+会去设它**。于是：
+
+| 打开方式 | 标志存在？ | 结果 |
+|---|---|---|
+| 单步控制台（`step_console.html?code=`） | 有 | 停下等点击 ✓ |
+| 会话页的 **Grid view** / split-screen | **无** | **2 秒跑完** ✗ |
+| 单个被试链接 / session-wide 链接 | **无** | **2 秒跑完** ✗ |
+
+更糟的是该标志在同一标签页里**粘住**：同一个 URL 的行为取决于此前在这个标签页里访问过
+什么。首次复现失败正是被这个特性骗过——先开过控制台，于是 Grid view「看起来正常」。
+
+**设计错误在于**：把「停下来」做成 opt-in，等于让最自然的操作路径（会话页上最显眼的
+那两个按钮）恰好绕过它，而且绕过时**不报错、不提示**，只表现为「跑得很快」。
+
+### 13.2 修法：删掉开关
+
+守卫改为**在 bot 页面上无条件生效**（`_templates/bot_step_guard.html` 不再读任何存储）。
+于是**任何入口**打开 bot 页面都会停下来等人点「下一页」。这消灭的是整类故障：
+不再有「开关没设 → 静默变成自动跑完」这种失败模式，因为不再有开关。
+
+「连续跑完」相应改为**由控制台反复点击驱动**（`setInterval` + 每帧 600ms 的最小点击
+间隔 + 150 次上限），不再依赖「撤掉开关」这一副作用——那个副作用本身还是个缺陷：
+它删掉标志且不恢复，按过之后同标签页里「全部前进一页」就永久失效了。
+
+**代价一条**（写入 README §4.1）：`otree browser_bots` 命令行启动器会挂住——它等被试
+跑完的完成信号，而现在被试永远等你去点。本项目不使用该启动器（它需要额外的 `ws4py`
+与 Chrome 拉起的独立工作流）。
+
+### 13.3 守卫与验证的同步调整
+
+- 新增回归用例 `test_demo_templates.py::TestGuardIsUnconditional`：守卫与控制台里
+  **不得出现 `sessionStorage.` 调用**。加了它就等于把这条故障重新打开。
+  （断言匹配带点的调用写法 `sessionStorage.`，不匹配光秃秃的关键词——两份文件里都有
+  「为什么不能用它」的注释，散文不该让用例变红。）
+- 原 `TestStepStorageKey`（断言两处键名一致）随开关一起删除——它守的东西已不存在。
+- **验证方式的教训**：§10.3 只按文档路径测了控制台，漏掉了会话页上更显眼的 Grid view。
+  返工后改为**逐个入口验证**：控制台、Grid view、单个被试链接，一个不落；「所有入口
+  都会停下」现在是硬性验收项，而不是「控制台能用就行」。
