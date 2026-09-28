@@ -1,0 +1,22 @@
+{# 单步演示守卫。只被 _templates/otree/Page.html 在
+   player.participant.is_browser_bot 为真时 include —— 真实被试的页面
+   不含本文件的任何字节（trust_game/test_demo_templates.py 钉住该条件）。
+
+   按下「全部前进一页」的控制台页会先设好 sessionStorage 开关再创建 iframe；
+   同源 iframe 共享同一标签页的 sessionStorage，故此处读得到。
+   开关不在的场合（例如直接打开 oTree 演示页的 Grid view）守卫不生效，
+   机器人照旧自动跑完——那是「连续跑完」的默认行为。 #}
+<script>
+(function () {
+    if (sessionStorage.getItem('otree_bot_step') !== '1') return;
+    // oTree 在每个页面末尾追加一段自动提交脚本（otree/views/abstract.py:501-513），
+    // 内容是 form.submit()。把它覆盖成空操作，页面就会停下来等控制台的按钮。
+    // 人类点页面上的「下一页」走的是原生表单提交，不经过 HTMLFormElement.prototype.submit，
+    // 因此照常工作；而机器人下一次要提交的答案在页面被 GET 时就已在服务端排队
+    // （otree/views/abstract.py:494），所以点下去用的就是机器人的答案。
+    // 覆盖 .on 是因为 oTree 那段脚本还调用了 form.on(...)（jQuery 方法），
+    // 不覆盖的话每次都会往控制台抛一条 TypeError（oTree 自身缺陷，无害但很吵）。
+    HTMLFormElement.prototype.submit = function () {};
+    HTMLFormElement.prototype.on = function () {};
+})();
+</script>
