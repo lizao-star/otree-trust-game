@@ -5,7 +5,15 @@
 {{ block content }}
 <div class="card">
   <div class="card-body">
-    <p>欢迎参加本实验。你将与另一位参与者随机配对，双方互不认识。</p>
+    <p>欢迎参加本实验。你将与另一位参与者随机配对，双方互不认识。
+    <strong>角色由系统随机分配</strong>，与你本人的任何特征无关。</p>
+
+    {# 报酬口径前置加粗：兑换率与出场费是被试最关心的两个数，此前放在
+       指导语末尾的灰色小字里，容易被略读。字面量仍经 vars_for_template
+       渲染（同源约束由 test_content.py 钉住）。 #}
+    <div class="alert alert-warning">
+      <strong>报酬：</strong>每 1 点可兑换 {{ currency_per_point }} 元人民币，另有 {{ participation_fee }} 元出场费。整个实验共约 14 个页面，大约需要 15–20 分钟。
+    </div>
 
     {{ if is_investor }}
       <h5>你的角色：投资者（甲方）</h5>
@@ -13,12 +21,33 @@
       <p>你送出的点数会被实验者<strong>乘以 {{ multiplier }}</strong> 后交给乙方。</p>
       <p>随后乙方决定返还多少点给你。你的最终收益为：</p>
       <p class="text-center"><strong>{{ endowment }} − 你送出的点数 + 乙方返还的点数</strong></p>
+      <table class="table table-sm table-bordered w-auto small">
+        <thead>
+          <tr><th>若你送出</th><th>乙方收到</th><th>你的收益（若乙方返还 0 点）</th><th>你的收益（若乙方全部返还）</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>0 点</td><td>0 点</td><td>10 点</td><td>10 点</td></tr>
+          <tr><td>5 点</td><td>15 点</td><td>5 点</td><td>15 点</td></tr>
+          <tr><td>10 点</td><td>30 点</td><td>0 点</td><td>30 点</td></tr>
+        </tbody>
+      </table>
     {{ else }}
       <h5>你的角色：受托人（乙方）</h5>
       <p>甲方初始获得 <strong>{{ endowment }} 点</strong>，并决定送出其中一部分给你。</p>
       <p>甲方送出的点数会被实验者<strong>乘以 {{ multiplier }}</strong> 后交给你，因此你最多可获得 {{ max_return }} 点。</p>
       <p>随后你决定返还多少点给甲方。你的最终收益为：</p>
       <p class="text-center"><strong>你收到的点数 − 你返还给甲方的点数</strong></p>
+      <table class="table table-sm table-bordered w-auto small">
+        <thead>
+          <tr><th>若甲方送出</th><th>你收到</th><th>你的收益（若你返还一半）</th><th>你的收益（若你全不返还）</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>0 点</td><td>0 点</td><td>0 点</td><td>0 点</td></tr>
+          <tr><td>5 点</td><td>15 点</td><td>7.5 点</td><td>15 点</td></tr>
+          <tr><td>10 点</td><td>30 点</td><td>15 点</td><td>30 点</td></tr>
+        </tbody>
+      </table>
+      <p class="text-muted small">返还额必须是 0 到「你收到的点数」之间的整数。</p>
     {{ endif }}
 
     {# 消息环节的四种情形互斥，措辞必须让被试准确知道自己处在哪一种。
@@ -36,13 +65,35 @@
       <p>整个过程中你与对方完全匿名，不会有任何信息交流。</p>
     {{ endif }}
 
-    {{ if is_investor }}
-      <p><strong>信念判断奖金：</strong>在你做出送出决策之前，你会被问及「你认为对方会返还你所送出金额放大后的百分之多少」。
-      若你的判断与实际结果相差不超过 {{ belief_tolerance_pct }} 个百分点，你将额外获得 <strong>{{ belief_bonus_points }} 点</strong>奖金；否则为 0 点。</p>
-      <p><strong>请注意：若你送出的点数为 0，则本项奖金为 0</strong>——此时没有发生实际转移，无法对你的判断进行评分。</p>
+    {# 「消息不具约束力」移到指导语的通用部分（凡有消息环节的人都能看到），
+       而不是只在收信方读消息的那一刻提示：条件性的提醒相当于只给收信方
+       一个「别太信」的暗示，会稀释承诺操纵的效应。放在这里，「承诺不可
+       强制执行」是组内共同知识，对双方同时披露。 #}
+    {{ if any_message }}
+      <p class="text-muted">请注意：消息只是意向的表达，<strong>不具约束力</strong>，实验不会强制任何人遵守。</p>
     {{ endif }}
 
-    <p class="text-muted">每 1 点可兑换 {{ currency_per_point }} 元人民币，另有 {{ participation_fee }} 元出场费。</p>
+    {# 两次信念测量的分界是**消息环节**，不是决策——两次都发生在被试做出
+       送出/返还决策之前。此前的文案写「决策之前与之后」，与实际页面顺序
+       不符（第二次信念在决策页之前出现），被试会以为自己漏了页。 #}
+    {{ if is_investor }}
+      <p><strong>信念判断奖金：</strong>{{ if any_message }}你会在消息环节之前与之后各报告一次{{ else }}你会在实验中先后两次回答同一个问题{{ endif }}「你认为乙方会返还你所送出金额放大 3 倍后的百分之多少」。
+      {{ if any_message }}
+        实验会随机抽取其中一次作为计奖依据：若该次判断与实际结果相差不超过 {{ belief_tolerance_pct }} 个百分点，你将额外获得 <strong>{{ belief_bonus_points }} 点</strong>奖金；否则为 0 点。
+        抽取结果在结算页面公布。
+      {{ else }}
+        由于你们这一组不会交换消息，第一次是一个假设性问题（「假如可以交换消息」），只用于研究基线，不参与计奖；第二次用于计奖：若与实际结果相差不超过 {{ belief_tolerance_pct }} 个百分点，你将额外获得 <strong>{{ belief_bonus_points }} 点</strong>奖金。
+      {{ endif }}</p>
+      <p><strong>请注意：若你送出的点数为 0，则本项奖金为 0</strong>——此时没有发生实际转移，无法对你的判断进行评分。</p>
+    {{ else }}
+      <p><strong>信念判断奖金：</strong>{{ if any_message }}你会在消息环节之前与之后各回答两个问题{{ else }}你会在实验中先后两次回答两个问题{{ endif }}：你认为甲方会送出多少点；以及你认为，甲方相信你会返还你所收到点数的百分之多少。
+      {{ if any_message }}
+        实验会随机抽取其中一次作为计奖依据。
+      {{ else }}
+        由于你们这一组不会交换消息，第一次是假设性问题，只用于研究基线，不参与计奖；第二次用于计奖。
+      {{ endif }}
+      两个问题分别计奖：送出点数的预测与实际相差不超过 {{ trustee_belief_tolerance_points }} 点，得 <strong>{{ belief_bonus_points }} 点</strong>；甲方信念的预测（即二阶信念问题）与甲方的实际报告相差不超过 {{ belief_tolerance_pct }} 个百分点，得 <strong>{{ belief_bonus_points }} 点</strong>。若甲方送出 0 点，二阶信念那部分奖金为 0（此时甲方的判断没有参与计奖，无法作为评分基准）。</p>
+    {{ endif }}
   </div>
 </div>
 

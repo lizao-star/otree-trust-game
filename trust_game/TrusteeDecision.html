@@ -10,7 +10,7 @@
   <p class="text-danger">你的本轮收益为 0 点。</p>
 {{ else }}
   <p>经过乘以 {{ C.MULTIPLIER }} 后，你收到 <strong>{{ max_return }} 点</strong>。</p>
-  <p>请决定返还多少点给甲方（0 到 {{ max_return }} 之间）：</p>
+  <p>请决定返还多少点给甲方（0 到 {{ max_return }} 之间的整数）：</p>
   {{ formfields }}
 {{ endif }}
 

@@ -1,6 +1,7 @@
 """content 模块与面向被试文案的单元测试。
 
-运行：/share/zrs2022150501010/miniconda3/envs/otree/bin/python -m unittest trust_game.test_content -v
+运行（项目根目录）：
+    & "C:\\Anaconda\\envs\\otree\\python.exe" -m unittest trust_game.test_content -v
 """
 
 import ast
@@ -57,6 +58,38 @@ class TestContent(unittest.TestCase):
         self.assertEqual(codes[0], 4)   # 全部送出
         self.assertEqual(codes[-1], 0)  # 还没有决定
         self.assertEqual(codes, sorted(codes, reverse=True))
+
+    # ---- 承诺二元编码（is_promise） ----
+    #
+    # 这是报告里「承诺」自变量的唯一实现。若阈值被改动（例如降到 1，把
+    # 「我不确定会不会返还」也算作承诺），承诺组与未承诺组的对比会整体
+    # 失真，而页面、bot 测试都不报错——故五档必须逐值钉住。
+
+    def test_is_promise_codes_all_five_levels(self):
+        """五档逐值编码：强度 >= 2 记为承诺，0-1 档不算承诺。"""
+        expected = {4: 1, 3: 1, 2: 1, 1: 0, 0: 0}
+        for code, label in content.TRUSTEE_MESSAGES:
+            self.assertEqual(
+                content.is_promise(label), expected[code],
+                f'编码 {code} 的承诺判定与量表定义不符（「{label}」）',
+            )
+
+    def test_promise_threshold_is_two(self):
+        """阈值本身也要钉住，否则改常量可绕过上一条的逐值断言。"""
+        self.assertEqual(content.PROMISE_MIN_STRENGTH, 2)
+
+    def test_is_promise_rejects_unknown_label(self):
+        with self.assertRaises(KeyError):
+            content.is_promise('不存在的消息')
+
+    def test_is_promise_rejects_investor_scale_label(self):
+        """投资者的意向文案不在受托人量表上，必须抛 KeyError。
+
+        若编码时误用了 INVESTOR_MESSAGES，「我打算把全部 10 点都送给你」这类
+        意向句会被当成返还承诺——而 investors 根本没有发送义务。
+        """
+        with self.assertRaises(KeyError):
+            content.is_promise(content.INVESTOR_MESSAGES[0][1])
 
 
 def shipped_session_config_defaults():
@@ -150,6 +183,10 @@ class TestIntroductionDisclosure(unittest.TestCase):
         self.assertEqual(
             ctx['belief_bonus_points'], payoffs.BELIEF_BONUS_POINTS
         )
+        self.assertEqual(
+            ctx['trustee_belief_tolerance_points'],
+            payoffs.TRUSTEE_BELIEF_TOLERANCE_POINTS,
+        )
 
     def test_investor_copy_states_current_accuracy_rule(self):
         html = self._render(is_investor=True)
@@ -164,9 +201,123 @@ class TestIntroductionDisclosure(unittest.TestCase):
         html = self._render(is_investor=True)
         self.assertIn('若你送出的点数为 0，则本项奖金为 0', html)
 
-    def test_trustee_copy_has_no_bonus_disclosure(self):
-        """受托人没有奖金，指导语不得出现该项披露。"""
-        self.assertNotIn('信念判断奖金', self._render(is_investor=False))
+    def test_trustee_copy_states_both_bonus_rules(self):
+        """受托人现在也有两个带激励的信念任务，指导语必须逐项说明。
+
+        两个问题的判定单位不同（点数 vs 百分点），若只写一个容差，被试无法
+        判断另一个问题是否计奖，也就不会认真作答。
+        """
+        html = self._render(is_investor=False)
+        self.assertIn('信念判断奖金', html)
+        self.assertIn(
+            f'相差不超过 {payoffs.TRUSTEE_BELIEF_TOLERANCE_POINTS} 点', html
+        )
+        self.assertIn(
+            f'相差不超过 {payoffs.BELIEF_TOLERANCE_PCT} 个百分点', html
+        )
+        self.assertIn('甲方相信你会返还', html)
+
+    def test_trustee_copy_discloses_second_order_scoring_basis(self):
+        """二阶信念的计奖基准是甲方的实际报告，必须写进指导语。
+
+        若不披露基准，被试无法区分「与实际返还比较」和「与对方判断比较」
+        这两种完全不同的评分规则；前者已从实现中移除（见
+        payoffs.second_order_bonus 的说明），文案必须同步。
+        """
+        html = self._render(is_investor=False)
+        self.assertIn('与甲方的实际报告相差不超过', html)
+        self.assertIn('若甲方送出 0 点，二阶信念那部分奖金为 0', html)
+
+    def test_timing_wording_matches_page_sequence(self):
+        """两次信念测量的分界是「消息环节」，不是决策——文案必须与页面
+        顺序一致。两次测量都在决策页之前完成（BeliefElicit 在
+        InvestorDecision 之前）；若文案写「决策之前与之后」，被试会以为
+        自己漏了决策之后的页面。无沟通组没有消息环节，改用「先后两次」
+        的中性说法。
+        """
+        for is_investor in (True, False):
+            with self.subTest(is_investor=is_investor):
+                html = self._render(is_investor=is_investor)
+                self.assertNotIn('决策之前与之后', html)
+                self.assertNotIn('决策之前与之后各', html)
+
+        config = dict(shipped_session_config_defaults(),
+                      investor_sends_message=True,
+                      trustee_sends_message=True)
+        for is_investor in (True, False):
+            with self.subTest(communicating=True, is_investor=is_investor):
+                html = self._render(is_investor=is_investor, config=config)
+                self.assertIn('消息环节之前与之后', html)
+
+    def test_non_binding_disclaimer_is_common_knowledge(self):
+        """「消息不具约束力」必须出现在指导语（凡有消息环节都可见）。
+
+        此前该提示只在收信方读消息的那一刻出现（MessageReveal），相当于
+        条件性地只给收信方一个「别太信」的暗示，会稀释承诺操纵的效应；
+        移入指导语后成为组内共同知识。
+        「不具约束力」只应在有消息环节的组出现（无沟通组提消息反而暗示
+        后面会有消息），但对组内双方都可见。
+        """
+        self.assertNotIn('不具约束力', self._render(is_investor=True))
+        self.assertNotIn('不具约束力', self._render(is_investor=False))
+
+        config = dict(shipped_session_config_defaults(),
+                      investor_sends_message=True,
+                      trustee_sends_message=True)
+        for is_investor in (True, False):
+            with self.subTest(is_investor=is_investor):
+                self.assertIn('不具约束力',
+                              self._render(is_investor=is_investor, config=config))
+
+    def test_trustee_copy_discloses_random_scoring_timing(self):
+        config = dict(shipped_session_config_defaults(),
+                      investor_sends_message=True,
+                      trustee_sends_message=True)
+        self.assertIn(
+            '随机抽取其中一次作为计奖依据',
+            self._render(is_investor=False, config=config),
+        )
+
+    def test_no_message_copy_states_hypothetical_baseline(self):
+        """无沟通组也要填一次事前判断，但必须说明它是假设性的、不计奖。
+
+        若只把页面接上而不改文案，被试会以为自己处在有消息的条件里，或者
+        以为这次判断也参与奖金；两种误解都会污染基线本身。
+        """
+        for is_investor in (True, False):
+            with self.subTest(is_investor=is_investor):
+                html = self._render(is_investor=is_investor)
+                self.assertIn('假设性问题', html)
+                self.assertIn('不参与计奖', html)
+
+    def test_communication_copy_does_not_call_the_baseline_hypothetical(self):
+        """有消息组的那次判断是真实的，不能出现「假设性问题」。"""
+        config = dict(shipped_session_config_defaults(),
+                      investor_sends_message=True,
+                      trustee_sends_message=True)
+        for is_investor in (True, False):
+            with self.subTest(is_investor=is_investor):
+                self.assertNotIn(
+                    '假设性问题',
+                    self._render(is_investor=is_investor, config=config),
+                )
+
+    def test_communication_copy_discloses_random_scoring_timing(self):
+        """沟通组必须事先说明「随机抽取一次计奖」。
+
+        计奖时点在 creating_session 里随机决定。若指导语不提这件事，被试会
+        以为奖金只看消息后那次，从而给消息前那次随便填——而抽中消息前那次
+        时，奖金就建立在一个没有激励的回答上。
+        """
+        config = dict(shipped_session_config_defaults(),
+                      investor_sends_message=True,
+                      trustee_sends_message=True)
+        html = self._render(is_investor=True, config=config)
+        self.assertIn('随机抽取其中一次作为计奖依据', html)
+
+    def test_no_message_copy_has_no_random_scoring_disclosure(self):
+        """无沟通组只测一次，不能出现「随机抽取」。"""
+        self.assertNotIn('随机抽取', self._render(is_investor=True))
 
     # ---- 报酬口径（兑换率、出场费）同源：原先硬编码在模板里 ----
 

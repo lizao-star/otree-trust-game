@@ -6,9 +6,10 @@
 <ul class="list-group">
   <li class="list-group-item">甲方送出的点数：{{ send_amount }}</li>
   <li class="list-group-item">乙方返还的点数：{{ return_amount }}</li>
-  {{ if is_investor }}
-    <li class="list-group-item">你获得的信念判断奖金：{{ belief_bonus }} 点</li>
-  {{ endif }}
+  <li class="list-group-item">
+    本次信念奖金依据：{{ if belief_paid_timing == 'before' }}决策之前的那次判断{{ else }}决策之后的那次判断{{ endif }}
+  </li>
+  <li class="list-group-item">你获得的信念判断奖金：{{ my_belief_bonus }} 点</li>
   <li class="list-group-item active">你的本轮收益：{{ my_payoff }}</li>
 </ul>
 

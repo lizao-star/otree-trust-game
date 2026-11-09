@@ -1,7 +1,8 @@
 """payoffs 模块的单元测试。
 
-运行：/share/zrs2022150501010/miniconda3/envs/otree/bin/python -m unittest trust_game.test_payoffs -v
-（在项目根目录执行；不要用 unittest discover，它会误加载依赖 oTree 上下文的 tests.py）
+运行（项目根目录）：
+    & "C:\\Anaconda\\envs\\otree\\python.exe" -m unittest trust_game.test_payoffs -v
+（不要用 unittest discover，它会误加载依赖 oTree 上下文的 tests.py）
 """
 
 import unittest
@@ -91,6 +92,80 @@ class TestPayoffs(unittest.TestCase):
         for belief in (0, 5, 10, 11, 50, 100):
             with self.subTest(belief=belief):
                 self.assertEqual(payoffs.belief_bonus(belief, 0, 0), 0)
+
+    def test_scored_belief_follows_the_drawn_timing(self):
+        """计奖时点决定取哪一次报告：两次取值不同，取错必然可见。"""
+        before, after = 30, 50
+        self.assertEqual(
+            payoffs.scored_belief(before, after, payoffs.BELIEF_TIMING_BEFORE),
+            before,
+        )
+        self.assertEqual(
+            payoffs.scored_belief(before, after, payoffs.BELIEF_TIMING_AFTER),
+            after,
+        )
+
+    def test_scored_belief_falls_back_to_after_without_message_round(self):
+        """无沟通组只有消息后那一次测量，时点恒为 after。"""
+        self.assertEqual(
+            payoffs.scored_belief(None, 50, payoffs.BELIEF_TIMING_AFTER),
+            50,
+        )
+
+    def test_second_order_bonus_compares_against_investor_belief(self):
+        """二阶信念奖金按「与投资者报告的信念之差」判定，容差 10 个百分点。"""
+        for second, investor in ((45, 50), (40, 50), (50, 50), (55, 50), (60, 50)):
+            with self.subTest(second=second, investor=investor):
+                self.assertEqual(
+                    payoffs.second_order_bonus(second, investor), 2)
+        for second, investor in ((30, 50), (39, 50), (61, 50), (70, 50)):
+            with self.subTest(second=second, investor=investor):
+                self.assertEqual(
+                    payoffs.second_order_bonus(second, investor), 0)
+
+    def test_second_order_bonus_boundary_is_inclusive(self):
+        self.assertEqual(payoffs.second_order_bonus(40, 50), 2)
+        self.assertEqual(payoffs.second_order_bonus(60, 50), 2)
+        self.assertEqual(payoffs.second_order_bonus(39, 50), 0)
+        self.assertEqual(payoffs.second_order_bonus(61, 50), 0)
+
+    def test_second_order_bonus_returns_zero_without_investor_belief(self):
+        """基准缺失（None）返回 0；x=0 的拦截在调用处完成，这里钉住
+        「基准不可用时不得发奖」这条底线。"""
+        self.assertEqual(payoffs.second_order_bonus(50, None), 0)
+
+    def test_trustee_belief_bonus_within_tolerance(self):
+        """预测送出点数误差 <= 2 点得 2 点。"""
+        for belief, actual in ((3, 5), (4, 5), (5, 5), (6, 5), (7, 5)):
+            with self.subTest(belief=belief, actual=actual):
+                self.assertEqual(
+                    payoffs.trustee_belief_bonus(belief, actual), 2)
+
+    def test_trustee_belief_bonus_outside_tolerance(self):
+        for belief, actual in ((1, 5), (2, 5), (8, 5), (9, 5), (10, 5)):
+            with self.subTest(belief=belief, actual=actual):
+                self.assertEqual(
+                    payoffs.trustee_belief_bonus(belief, actual), 0)
+
+    def test_trustee_belief_bonus_is_paid_when_x_is_zero(self):
+        """x = 0 时受托人一阶奖金照发。
+
+        受托人无法改变投资者送多少，因此「准确预测 0 点而额外拿钱」不会
+        扭曲任何行为；这与投资者比例奖金的 x=0 规则是两回事。
+        """
+        for belief in (0, 1, 2):
+            with self.subTest(belief=belief):
+                self.assertEqual(payoffs.trustee_belief_bonus(belief, 0), 2)
+        self.assertEqual(payoffs.trustee_belief_bonus(3, 0), 0)
+
+    def test_trustee_belief_bonus_matches_rule_exhaustively(self):
+        """穷举所有合法的 (预测, 实际) 组合。"""
+        for actual in range(11):
+            for belief in range(11):
+                expected = 2 if abs(belief - actual) <= 2 else 0
+                with self.subTest(actual=actual, belief=belief):
+                    self.assertEqual(
+                        payoffs.trustee_belief_bonus(belief, actual), expected)
 
     def test_belief_bonus_matches_exact_rational_solution_exhaustively(self):
         """穷举验证整数实现与规定期望值完全一致。

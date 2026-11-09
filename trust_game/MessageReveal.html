@@ -7,6 +7,16 @@
   <p>对方选择的消息是：</p>
   <p class="lead">「{{ message_from_other }}」</p>
 </div>
-<p class="text-muted">请注意：消息不具约束力，对方没有义务遵守。</p>
+
+{# 双向组回显本方已发送的消息：被试无需回忆自己选了哪条，也确认
+   「对方看到的确实是这条」。 #}
+{{ if both_sends }}
+<div class="alert alert-secondary">
+  <p>你发送的消息是：</p>
+  <p>「{{ own_message }}」</p>
+</div>
+{{ endif }}
+
+<p class="text-muted">请基于这条消息继续完成后续判断。</p>
 {{ next_button }}
 {{ endblock }}

@@ -46,6 +46,13 @@ CONDITIONS = {
     'trust_both':   (True, True),
 }
 
+# 真实采集配置：条件与角色在**配对层**随机，故不携带固定的两个处理组键。
+# 上面四个固定条件 config 只用于演示与教学；若拿它们收真实数据，条件会与
+# 场次、时段、到场人群完全混淆。
+RANDOM_REAL = 'trust_random'
+RANDOM_DEMO = 'trust_random_bots'
+RANDOM_NAMES = (RANDOM_REAL, RANDOM_DEMO)
+
 
 def load_settings():
     """按文件路径加载项目根的 settings.py。"""
@@ -82,17 +89,18 @@ class TestDemoConfigs(unittest.TestCase):
         于是**根本不会进入被检查的集合**，测试照样全绿。集合相等把「改名」和
         「少登记」都变成失败。
         """
-        expected = set(CONDITIONS) | {self.demo_name(n) for n in CONDITIONS}
+        expected = (set(CONDITIONS) | {self.demo_name(n) for n in CONDITIONS}
+                    | set(RANDOM_NAMES))
         self.assertEqual(
             set(self.configs), expected,
             'settings.py 里的 config 名必须恰好是 CONDITIONS 登记的四个真实 config'
-            ' 与它们的 _bots 演示版。少了/多了/改了名，本文件与 tests.py 的核对'
-            '都会失去覆盖对象',
+            '、它们的 _bots 演示版，以及随机采集的 trust_random 与其演示版。'
+            '少了/多了/改了名，本文件与 tests.py 的核对都会失去覆盖对象',
         )
 
     def test_real_configs_must_not_use_browser_bots(self):
         """真实 config 绝不可带 use_browser_bots：否则真实被试会被 bot 顶替。"""
-        for name in CONDITIONS:
+        for name in list(CONDITIONS) + [RANDOM_REAL]:
             value = self.config(name).get('use_browser_bots', False)
             # 缺键与显式 False 都必须通过。用 assertIs 而非真值判断，
             # 使 None / 0 / '' 这些「碰巧为假」的值同样被拦下——
@@ -105,7 +113,7 @@ class TestDemoConfigs(unittest.TestCase):
 
     def test_demo_configs_use_browser_bots(self):
         """演示 config 必须带 use_browser_bots：单步控制台全靠它。"""
-        for real_name in CONDITIONS:
+        for real_name in list(CONDITIONS) + [RANDOM_REAL]:
             demo_name = self.demo_name(real_name)
             value = self.config(demo_name).get('use_browser_bots', False)
             self.assertIs(
@@ -156,6 +164,34 @@ class TestDemoConfigs(unittest.TestCase):
                     demo[key], real[key],
                     f'{self.demo_name(name)} 的 {key} 与 {name} 不一致',
                 )
+
+    # ---- 随机采集 ----
+
+    def test_random_config_randomizes_cells(self):
+        """真实采集 config 必须显式 randomize_cells=True。
+
+        缺键与写成 False 都意味着它退化成「整场一个条件」，而它的名字仍在
+        暗示「四格同场」——没有任何运行时报错，只是条件重新与场次混淆。
+        """
+        cfg = self.config(RANDOM_REAL)
+        self.assertIs(
+            cfg.get('randomize_cells', False), True,
+            f'{RANDOM_REAL} 必须带 randomize_cells=True，且不能是 None/1 等'
+            '碰巧为真的值',
+        )
+        # 随机 config 若同时带固定键，会让 creating_session 的两套赋值互相
+        # 覆盖（以随机分支为准），肉眼看配置却像是固定条件。
+        for key in (INVESTOR_KEY, TRUSTEE_KEY):
+            self.assertNotIn(
+                key, cfg,
+                f'{RANDOM_REAL} 不应携带固定条件键 {key}：条件和角色由配对层随机',
+            )
+
+    def test_random_demo_mirrors_random_real(self):
+        demo = self.config(RANDOM_DEMO)
+        real = self.config(RANDOM_REAL)
+        self.assertIs(demo.get('randomize_cells', False), True)
+        self.assertEqual(demo['app_sequence'], real['app_sequence'])
 
     def test_demo_configs_mirror_app_sequence(self):
         for name in CONDITIONS:

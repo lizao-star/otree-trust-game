@@ -26,6 +26,10 @@ TRUSTEE_MESSAGES = [
 INVESTOR_ROLE = 'Investor'
 TRUSTEE_ROLE = 'Trustee'
 
+# 受托人消息里算作「承诺」的最低强度：2 = 「我承诺会返还一部分」及以上。
+# 0-1 档（未决定 / 不确定）不含返还承诺。
+PROMISE_MIN_STRENGTH = 2
+
 
 def message_labels(messages):
     """返回用于 oTree 表单 choices 的 (存储值, 显示文案) 列表。
@@ -39,3 +43,14 @@ def strength_of(messages, label):
     """把消息文案映射回 0-4 的强度编码。未知文案抛 KeyError。"""
     mapping = {text: code for code, text in messages}
     return mapping[label]
+
+
+def is_promise(label):
+    """把受托人的预设消息编码成二元承诺指标（1 = 承诺返还，0 = 没有承诺）。
+
+    ⚠️ 这是**预设量表上的派生编码**，不是 Dufwenberg et al. (2026) 对自由
+    文本消息的 Promise 人工双编码。两者不可混用：论文的编码允许「我尽量」
+    这类模糊表述被判为承诺，本量表只有五档固定文案，编码边界由强度值决定。
+    报告与 README 必须同时标注这一点，避免被误读为复现论文的 Promise 变量。
+    """
+    return 1 if strength_of(TRUSTEE_MESSAGES, label) >= PROMISE_MIN_STRENGTH else 0

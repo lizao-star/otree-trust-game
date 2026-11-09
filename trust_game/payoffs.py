@@ -14,6 +14,31 @@ MULTIPLIER = 3
 BELIEF_TOLERANCE_PCT = 10
 BELIEF_BONUS_POINTS = 2
 
+# 受托人预测「投资者送出多少点」时使用的容差（点）与奖金金额（点）。
+# 以点数而非百分比判定，是因为该问题的答案本身就是 0-10 的整数点。
+TRUSTEE_BELIEF_TOLERANCE_POINTS = 2
+
+# 信念计奖时点。沟通组在消息环节前后各报告一次，实验随机抽取其中一次计奖；
+# 无沟通组只报告一次，计奖时点恒为 AFTER（不存在消息前的那次报告）。
+BELIEF_TIMING_BEFORE = 'before'
+BELIEF_TIMING_AFTER = 'after'
+
+
+def scored_belief(
+    belief_before,
+    belief_after,
+    timing: str,
+):
+    """按随机抽中的时点取用对应的返还比例判断。
+
+    只负责取值，不负责判奖——容差判定仍由 belief_bonus 完成，两处规则
+    因此不会各自演化。timing 恒为 BELIEF_TIMING_BEFORE / AFTER，由
+    creating_session 写入，不来自被试输入。
+    """
+    if timing == BELIEF_TIMING_BEFORE:
+        return belief_before
+    return belief_after
+
 
 def investor_payoff(send_amount: int, return_amount: int) -> int:
     """投资者收益 A = E - x + y，范围 0-30。"""
@@ -73,5 +98,46 @@ def belief_bonus(
         return 0
     denom = MULTIPLIER * send_amount
     if abs(belief_return_pct * denom - 100 * return_amount) <= tolerance_pct * denom:
+        return bonus
+    return 0
+
+
+def second_order_bonus(
+    second_order_belief: int,
+    investor_belief,
+    tolerance_pct: int = BELIEF_TOLERANCE_PCT,
+    bonus: int = BELIEF_BONUS_POINTS,
+) -> int:
+    """二阶信念奖金：受托人的二阶信念与**投资者报告的一阶信念**比较。
+
+    二阶信念的真值是「对方相信什么」，只能以对方实际报告的信念为基准。
+    若按实际返还比例评分，二阶信念在计量上退化为一阶信念的同义重述
+    （两者都以实际结果判分，区别只在措辞），测不出内疚厌恶路径所需的内容。
+
+    基准 belief 传入 None（时点对齐时对方同次报告缺失）返回 0；
+    x = 0 的情形在调用处拦截：投资者自己的信念奖金为 0 时其报告缺乏
+    激励支撑，作为基准不可靠。
+    """
+    if investor_belief is None:
+        return 0
+    if abs(second_order_belief - investor_belief) <= tolerance_pct:
+        return bonus
+    return 0
+
+
+def trustee_belief_bonus(
+    belief_send: int,
+    send_amount: int,
+    tolerance_points: int = TRUSTEE_BELIEF_TOLERANCE_POINTS,
+    bonus: int = BELIEF_BONUS_POINTS,
+) -> int:
+    """受托人一阶信念奖金：预测送出点数与实际送出点数相差不超过容差点数。
+
+    与投资者的比例判定不同，这里直接比较整数点，故不需要浮点或分母处理。
+    受托人的预测不影响投资者决策，因此 x = 0 时也照常计奖：不存在「送出 0
+    能额外拿钱」的激励问题——受托人无法改变 x，且 x=0 时其收益本就为 0，
+    给 2 点奖金只是对准确预测的报酬，不会扭曲任何行为。
+    """
+    if abs(belief_send - send_amount) <= tolerance_points:
         return bonus
     return 0

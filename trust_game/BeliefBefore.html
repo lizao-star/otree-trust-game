@@ -1,0 +1,21 @@
+{{ block title }}
+    {{ if hypothetical }}一个假设性的判断{{ else }}消息环节之前的判断{{ endif }}
+{{ endblock }}
+
+{{ block content }}
+{{ if hypothetical }}
+<p>
+  你们这一组不会交换消息。请设想一下：假如你们可以交换消息，
+  你认为对方会怎么做？这次判断只用于提供一个研究基线，<strong>不参与奖金计算</strong>。
+</p>
+{{ else }}
+<p>这是消息环节之前的第一次判断。请根据你目前掌握的信息回答下面的问题。</p>
+{{ endif }}
+{{ if is_investor }}
+  <p class="text-muted small">请填写 0 到 100 之间的整数：例如 50 表示「你认为乙方会返还收到金额的一半」。请凭你的真实判断填写，这次判断可能被抽中用于计奖。</p>
+{{ else }}
+  <p class="text-muted small">请回答下面两个问题：一个关于甲方会送出多少点，一个关于甲方相信你会返还多少。第二题请填写 0 到 100 之间的整数：例如 50 表示「你认为甲方相信你会返还收到金额的一半」。</p>
+{{ endif }}
+{{ formfields }}
+{{ next_button }}
+{{ endblock }}

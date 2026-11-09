@@ -48,6 +48,17 @@ SESSION_CONFIGS = [
         trustee_sends_message=True,
         doc='双方在决策前同时发送预设消息并互相可见',
     ),
+    # 真实采集推荐使用本配置：条件与角色在**配对层**随机，四格同场并存。
+    # 上面四个固定条件 config 只用于演示与教学——若用它们收真实数据，
+    # 条件会与场次、时段、到场人群完全混淆。
+    dict(
+        name='trust_random',
+        display_name='信任博弈 — 配对内随机四格（真实采集）',
+        app_sequence=['trust_game', 'survey'],
+        num_demo_participants=8,
+        randomize_cells=True,
+        doc='真实采集：每对配对的沟通条件与角色均随机，四个格子同场收集',
+    ),
     # 演示专用：-- 以下是四个「演示·单步」config，与上面四个真实 config 一一对应，
     # 两个处理组键逐值相同（test_settings.py 会核对镜像关系）。
     # use_browser_bots=True 让全体被试成为 browser bot（页面自动填写），
@@ -92,6 +103,15 @@ SESSION_CONFIGS = [
         num_demo_participants=8,
         investor_sends_message=True,
         trustee_sends_message=True,
+        use_browser_bots=True,
+        doc='演示专用，非真实数据；配套 _static/global/step_console.html',
+    ),
+    dict(
+        name='trust_random_bots',
+        display_name='信任博弈 — 配对内随机（演示·单步）',
+        app_sequence=['trust_game', 'survey'],
+        num_demo_participants=8,
+        randomize_cells=True,
         use_browser_bots=True,
         doc='演示专用，非真实数据；配套 _static/global/step_console.html',
     ),
