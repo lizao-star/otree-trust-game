@@ -1,0 +1,854 @@
+% !TEX program = xelatex
+% 编译：xelatex 实验设计与实现报告.tex （跑两遍以确定目录与引用编号）
+\documentclass[10pt,a4paper]{ctexart}
+
+\usepackage[margin=2.1cm]{geometry}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{amsmath}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{array}
+\usepackage[hidelinks]{hyperref}
+
+\linespread{1.0}
+\setlength{\emergencystretch}{2em}
+\pagestyle{plain}
+
+\setlist[itemize]{leftmargin=1.4em, itemsep=0.6pt, topsep=2pt, parsep=0pt}
+\setlist[description]{leftmargin=1.4em, itemsep=2pt, topsep=2pt, parsep=0pt}
+\titlespacing*{\section}{0pt}{9pt}{4pt}
+\titlespacing*{\subsection}{0pt}{6pt}{2pt}
+\titleformat{\section}{\normalfont\large\bfseries}{\thesection}{0.6em}{}
+\titleformat{\subsection}{\normalfont\normalsize\bfseries}{\thesubsection}{0.6em}{}
+
+\newcommand{\code}[1]{\texttt{#1}}
+
+\title{\vspace{-1.6em}\bfseries 沟通的方向性：承诺、意向与信任\\[3pt]
+\large 实验设计与实现报告}
+\author{章荣生\quad 2022621150313\\[2pt]
+\small 指导教师：王啸远\\[1pt]
+\small 行为经济学课程作业}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent
+本文是我在行为经济学课程中完成的一项 $2\times2$ 信任博弈实验的设计与实现。实验把事前沟通拆成
+两个独立因子：投资者 A 能否发送送出意向、受托人 B 能否发送返还承诺，四格为无沟通、仅
+$B\!\rightarrow\!A$、仅 $A\!\rightarrow\!B$ 与双向。设计采用单轮、被试间结构，条件与角色在配对层
+随机分配，使四个格子在同一场次内并存，减少条件与场次、时段、到场人群之间的混淆。测量上借鉴
+Dufwenberg、Li 与 Smith（2026）的若干方法学要件：承诺定义、诚信承诺页、消息前后各一次信念报告、
+随机抽取一次计奖、事后情绪与操纵检查；博弈结构仍为标准信任博弈，不设惩罚阶段。
+
+在此基础上，我做了三处补充。第一，无沟通组也在同一时序位置填写一次「假如可以交换消息」的
+事前判断，并以 \code{belief\_before\_hypothetical} 区分真实报告与假设性基线，为四格之间的
+信念比较提供基准。第二，受托人的信念报告由无激励改为有激励：一阶「对方会送出多少点」按点数
+判定，二阶「对方相信我会返还多少比例」按百分点判定，两项各 2 点。第三，$2\times2$ 设计本身
+还能析出一条自我承诺路径——A 发出意向之后，自己的送出额是否提高。正式假设只保留设计能给出
+直接组间对比的四条因子主效应；中介与交互作用不设正式假设，只做探索性描述，理由在正文中说明。
+实现基于 oTree 6.0.15（Python 3.11），仓库含 60 项单元测试与五个会话配置的机器人测试。报告同时
+说明本设计与论文的差异，以及它能回答与不能回答的问题。
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+\section{引言与研究问题}
+
+信任是交易得以发生的前提。Berg、Dickhaut 与 McCabe\cite{berg1995} 提出的信任博弈为在实验室中
+测量信任与可信度提供了标准范式：投资者获得禀赋 $E$，选择送出 $x$；实验者把 $x$ 乘以 $m$ 后交给
+受托人，受托人决定返还 $y$。自利预测给出 $x=0$，但大量实验观察到 $x>0$ 且 $y>0$。Johnson 与
+Mislin\cite{johnson2011} 对 162 个重复实验、逾 23{,}000 名被试的元分析显示，送出额与返还额显著受
+支付方式、对手是否为模拟被试、乘子大小、被试是否为学生等程序变量影响。这让我意识到，该范式所测
+行为对实验程序相当敏感，仅靠程序变量也难以回答「信任从何而来、如何提升」。
+
+事前沟通（cheap talk）是较受关注的干预之一。Charness 与 Dufwenberg\cite{charness2006} 让双方在
+决策前交换消息，发现承诺显著提高可信行为；Vanberg\cite{vanberg2008} 则分离出另一种解释，即人可能
+单纯偏好「守诺」本身。两项研究都表明沟通有效，但沟通经由哪条路径起作用仍有讨论空间。更让我在意
+的是，现有沟通实验大多让双方同时发送消息，再与无沟通组对比；双向沟通同时激活多条路径，两组对比
+只能给出混合效应，难以分别估计，也回答不了「沟通的方向是否重要」。
+
+本研究因而提出四个问题：
+
+\begin{enumerate}[label=RQ\arabic*., leftmargin=2.2em]
+  \item 受托人可以发送承诺消息时，投资者的送出额 $x$ 是否更高？
+  \item 受托人可以发送承诺消息时，在送出额相同的条件下，他自己的返还额 $y$ 是否更高？
+  \item 投资者可以发送意向消息时，在送出额相同的条件下，受托人的返还额 $y$ 是否更高？
+  \item 投资者发出意向之后，自己的送出额是否也发生变化？
+\end{enumerate}
+
+设计上的尝试是把沟通的方向作为独立因子引入标准信任博弈：四格设计让「承诺」「意向」两条此前
+被合并估计的路径各自落在一个可分别估计的对比上；实现上的尝试是把条件随机化从场次层下移到
+配对层，使一次场次即可收集全部四格，并让导出的数据自包含条件、角色与派生变量。
+
+\section{理论背景与研究假设}
+
+\subsection{三种解释}
+
+内疚厌恶路径。Charness 与 Dufwenberg\cite{charness2006} 认为，受托人之所以守诺，是因为他相信
+对方期待自己守诺；若失信，他会因辜负对方的期待而感到内疚。该解释依赖的变量是二阶信念，即受托人
+对「投资者相信什么」的信念。承诺通过改变二阶信念来改变行为。
+
+守诺偏好路径。Vanberg\cite{vanberg2008} 发现，承诺的效应无法完全由收益预期的变化解释，从而支持
+「人单纯偏好守住自己说过的话」这一解释。两条路径的区别在于：前者作用于收信人的预期，后者作用于
+发信人自身的偏好。
+
+愤怒路径。Dufwenberg、Li 与 Smith\cite{dufwenberg2026} 提出第三种、互补的解释：受影响的是收到
+承诺的人。承诺抬高了收信人对收益的预期；一旦承诺被打破，期望落空引发挫败，挫败转化为愤怒，愤怒
+又转化为愿意牺牲物质收益去惩罚对方的冲动。当发信人预见到这一点时，承诺反而成为不敢失信的约束。
+该文的一个设计特征是在信任/握持问题（hold-up）中加入惩罚阶段，消息只由 Player 2 发给 Player 1，
+并在消息前后各测一次双方信念。
+
+\subsection{本设计的路径分解}
+
+本实验不设惩罚阶段，因此只借鉴该文的测量方法，不检验其愤怒—惩罚机制。可检验的路径有四条：
+
+\begin{itemize}
+  \item 信念路径：B 可发承诺 $\rightarrow$ 提高 A 对返还的预期 $\rightarrow$ 提高 $x$；
+  \item 守诺路径：B 可发承诺 $\rightarrow$ 提高 B 自身的履约倾向 $\rightarrow$ 提高 $y$；
+  \item 意向路径：A 可发意向 $\rightarrow$ 提高 B 感知到的对方期待 $\rightarrow$ 提高 $y$；
+  \item 自我承诺路径：A 可发意向 $\rightarrow$ A 为保持言行一致而提高 $x$。
+\end{itemize}
+
+第四条路径与守诺路径平行，只是作用在发信人自己身上。A 一旦发出「我打算把全部送出」，他随后
+若送出较少，就与自己刚说过的话不一致；这种不一致本身可能带来成本。检验它只需要在 A 的样本中
+比较「A 可发意向」与「A 不可发」对 $x$ 的效应，并控制 B 是否可承诺，成本几乎为零。
+
+\subsection{研究假设}
+
+我只把实验设计能给出直接、清晰对比的问题列为正式假设。$2\times2$ 析因下，两个结果变量
+（A 的送出额 $x$、B 的返还额 $y$）各自对应两个相互正交的因子主效应，每条假设都是一次单自由度的
+组间比较，检验对象明确：
+
+\begin{description}[style=nextline]
+  \item[H1（主结果）] 受托人可以发送承诺消息时，投资者的送出额 $x$ 更高。
+        合并 \code{b\_to\_a} 与 \code{both} 两格，与 \code{none}、\code{a\_to\_b} 两格比较。
+  \item[H2] 控制送出额 $x$ 之后，受托人可以发送承诺消息时，返还额 $y$ 更高。
+        这条对应守诺路径：发信人自己更愿意履约。
+  \item[H3] 控制送出额 $x$ 之后，投资者可以发送意向消息时，返还额 $y$ 更高。
+        这条对应意向路径：受托人感知到对方的期待。
+  \item[H4] 投资者可以发送意向消息时，其自己的送出额 $x$ 更高。
+        合并 \code{a\_to\_b} 与 \code{both} 两格，与 \code{none}、\code{b\_to\_a} 两格比较，
+        对应自我承诺路径。
+\end{description}
+
+有两个问题我刻意不列为正式假设。
+
+其一是中介。信念中介（B 可发承诺 $\rightarrow$ A 的一阶信念更新 $\rightarrow$ 送出额提高）
+在单轮被试间设计里无法给出干净的因果识别：中介变量在处理之后测量，处理组与对照组的信念差异
+既可能反映信念更新，也可能反映选择或投射。我在第\ref{sec:measures}节为无沟通组加入了假设性
+事前基线，并直接测量二阶信念，这些测量可以支持探索性的机制描述——比如承诺是否伴随更高的
+事前信念、二阶信念是否与返还额相关——但我不会把它们写成需要显著性支撑的中介结论。
+
+其二是交互作用。两个因子的交互只能使用单格样本，是本设计检验力最弱的部分；即便真实存在
+交互效应，以每格 40--60 人的规模也很可能检不出来。检不出既可能意味着「无交互」，也可能只是
+功效不足，两种解释无法区分。因此交互只做描述性报告（效应量与置信区间），不进入假设检验的
+结论部分。
+
+\section{实验设计}\label{sec:design}
+
+\subsection{博弈与参数}
+
+单轮信任博弈。参数由程序常量 \code{payoffs.py} 与 \code{settings.py} 渲染，报告中的数值与代码
+逐项对应，不另立真值源。
+
+\begin{table}[h]
+\centering\small
+\begin{tabular}{lll}
+\toprule
+参数 & 取值 & 说明 \\
+\midrule
+禀赋 $E$ & 10 点 & 仅投资者拥有 \\
+乘子 $m$ & 3 & 投资者送出 $x$ 后，受托人收到 $3x$ \\
+送出额 $x$ & $0$--$10$ 的整数 & 投资者决策 \\
+返还额 $y$ & $0$--$3x$ 的整数 & 受托人决策；$x=0$ 时不渲染表单，$y$ 记为 0 \\
+投资者收益 & $10-x+y$ & 另加信念奖金 0 或 2 点 \\
+受托人收益 & $3x-y$ & 另加信念奖金 0、2 或 4 点 \\
+兑换率 & 1 点 $=$ 1 元 & \code{real\_world\_currency\_per\_point} \\
+出场费 & 20 元 & \code{participation\_fee} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+$x=0$ 的处理是设计的一部分：受托人无金额可返还，决策页不渲染表单，$y$ 在
+\code{before\_next\_page} 中补写为 0，结算阶段不会读取空值。这样「不信任」也是一个可执行、
+可结算的选项，不会把被试卡在页面上。
+
+\subsection{$2\times2$ 沟通设计}
+
+处理组由两个布尔因子决定，不用一个四值字符串：两列直接进入双因素分析，避免分析阶段再把一个
+字符串拆回两个因子（拆错不会报错）。
+
+\begin{table}[h]
+\centering\small
+\begin{tabular}{lcccc}
+\toprule
+条件 & 单元格标签 & A 可发意向 & B 可发承诺 & 消息环节 \\
+\midrule
+无沟通 & \code{none} & 否 & 否 & 双方均无 \\
+仅 $B\!\rightarrow\!A$（承诺） & \code{b\_to\_a} & 否 & 是 & B 发、A 看 \\
+仅 $A\!\rightarrow\!B$（意向） & \code{a\_to\_b} & 是 & 否 & A 发、B 看 \\
+双向 & \code{both} & 是 & 是 & 双方发、互相看 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+等待页对组内所有人显示（含不发送的一方）：接收方不进发送页而直接到等待页，发送方提交后才放行。
+因此接收方不会在消息发出之前越过等待页看到它，消息也不会在对方提交前被读到。
+
+四组除消息页外使用相同的代码、模板、参数与指导语结构；指导语按各自的信息结构切换一段说明，
+并明确告知不能发送的那一方「你无法向对方发送任何消息」。否则单向组的接收方会以为页面漏了，
+而对信息结构的含糊本身会变成处理内变异。
+
+\subsection{单轮、被试间设计}
+
+每名被试只经历一个条件、只做一次决策。信念在消息前后各测一次，属于同一轮内的重复测量，但不
+构成处理条件的被试内交叉。选择单轮被试间而非多轮被试内，主要出于以下考虑。
+
+\begin{table}[h]
+\centering\small
+\begin{tabular}{p{2.9cm}p{5.6cm}p{5.6cm}}
+\toprule
+维度 & 单轮被试间（本设计） & 多轮被试内 \\
+\midrule
+承诺的性质 & 一次性、不可验证，承诺可信度是真实信号 & 多轮后承诺可被验证，被试会学习「承诺是否兑现」 \\
+历史效应 & 无 & 前轮结果影响后轮信念与行为，需区组、顺序平衡、聚类标准误 \\
+策略学习 & 无 & 存在，固定角色时尤其明显 \\
+功效 & 较弱，需要更大 $N$ & 较强，但效应量被历史污染 \\
+与文献可比性 & 与 Berg 等\cite{berg1995}、Charness 与 Dufwenberg\cite{charness2006} 的一次性设计一致 & 与 Dufwenberg 等\cite{dufwenberg2026} 的多轮区组结构可比 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+论文使用多轮（20 轮）是为了估计承诺与惩罚随轮次的动态，并非为了提高功效。本项目的因变量是
+「沟通方向是否影响信任」，单轮足以回答；引入多轮会把「一次性承诺」变成「可验证的重复承诺」，
+改变机制本身，可能削弱构念效度。
+
+若未来要做多轮，最低要求是：固定角色、每轮重新随机配对新对手、轮间不反馈对方身份、随机抽取
+一轮支付、6--10 轮而非 20 轮、沟通条件按区组分配并平衡顺序。否则「承诺」的操纵会失效，轮次
+效应也难以与处理效应分离。
+
+\subsection{随机化层级：配对层而非场次层}
+
+本设计把条件与角色都在配对层随机：每对配对独立抽取两个布尔值（A 是否可发、B 是否可发），双方
+共享同一对条件；角色也在配对内随机分配。四个格子因此在一次场次内同时存在。
+
+这一选择针对场次级随机化的三个问题：
+
+\begin{enumerate}
+  \item 混淆。若一个场次只有一个条件，条件就与场次、时段、到场人群完全混淆，标准误无法区分
+        「处理效应」与「这一场的人不同」。
+  \item 成本。课程场景通常一次只能开一个 session；四个条件要开四场，且每场都要凑够人数。
+  \item 平衡。同一场次内无法做到四格同时平衡，出现缺格时只能整场重开。
+\end{enumerate}
+
+配对层随机仍是被试间设计——每个人只经历一个条件、只做一次决策——但去掉了场次级混淆。代价是
+各格实际人数由随机数决定，不再像固定配置那样精确相等；采集结束后先按 \code{pair\_cell} 核对
+四格平衡，再进入分析。
+
+四种固定条件的会话配置（\code{trust\_none}、\code{trust\_b\_to\_a}、\code{trust\_a\_to\_b}、
+\code{trust\_both}）保留，但只用于演示与教学；真实采集使用 \code{trust\_random}。固定配置若用于
+真实数据，会让条件重新与场次混淆。
+
+\subsection{配对与匿名}
+
+同场次内两人一组，配对在进入实验时完成。四格条件与角色均随机，被试在实验结束前不知道对手身份，
+实验结束后也不揭示。匿名与「一次性」共同保证承诺不可验证，这是承诺具有信号价值的前提。
+
+\subsection{样本量与功效}
+
+建议每个格子收集 40--60 名被试，合计 160--240 名（80--120 对）。这一区间基于两点考虑：
+
+\begin{itemize}
+  \item 两个因子的主效应各自把两个格子合并，故主效应的有效样本约为单格的两倍，检验力高于
+        「每格人数」的直觉判断；
+  \item 交互作用只能使用单格样本，是本设计检验力最弱的部分，故交互只做描述性报告
+        （效应量与置信区间），不进入假设检验的结论部分（见第 2.3 节的说明）。
+\end{itemize}
+
+每格低于 25 人时只能检出较大效应，不太适合作为正式采集的规模。报告不写精确功效数值：功效取决于
+最终采用的检验族、多重比较校正与真实效应量，给出单一数字反而会制造虚假的精确感。
+
+\subsection{消息量表与承诺编码}
+
+两侧消息各为 5 条预设选项、$0$--$4$ 序数编码，编码越高表示意向或承诺越强。使用封闭集合是为了
+保证跨被试可比，避免书写能力与语言风格混入处理效应。发送强制（必须选一条），接收方只读。
+
+\begin{table}[h]
+\centering\small
+\begin{tabular}{cll}
+\toprule
+编码 & 投资者（意向） & 受托人（承诺） \\
+\midrule
+4 & 我打算把全部 10 点都送给你 & 我承诺会把收到的点数全部返还给你 \\
+3 & 我打算送出大部分点数 & 我承诺会返还一半以上 \\
+2 & 我打算送出一部分点数 & 我承诺会返还一部分 \\
+1 & 我打算只送出很少的点数 & 我不确定会不会返还 \\
+0 & 我还没有决定 & 我还没有决定 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+承诺的二元编码。派生指标 \code{promise} 由 \code{content.is\_promise()} 生成：受托人消息强度
+$\geq 2$ 记为 1（明确承诺返还一部分及以上），0--1 记为 0。该字段由消息等待页在消息提交后一次性
+写入组内两行，便于导出后任一角色行直接使用，不必再连表取对方行。
+
+编码 2 的文案是「我承诺会返还一部分」，「一部分」可以低至 1 点，与编码 1「我不确定会不会
+返还」的实际行为差异可能很小。分析时我会用强度 $\geq 3$（承诺返还一半以上）做第二个阈值，
+两个口径都报告：若结论只在宽口径下成立，就说明效应主要由弱承诺贡献，解释时要相应弱化。
+原始强度 \code{promise\_strength} 已经入库，双阈值分析不需要改代码。
+
+这里需要说明的是，它只是预设量表上的派生编码，与 Dufwenberg 等\cite{dufwenberg2026} 对自由文本
+消息的人工双编码不同。论文的编码允许「我尽量」这类模糊表述被判为承诺；本量表只有五档固定文案，
+编码边界由强度值决定。两者不宜混用，报告与数据说明都应标注这一点，以免被误读为复现论文的
+\texttt{Promise} 变量。
+
+\section{测量与激励}\label{sec:measures}
+
+\subsection{行为变量}
+
+主要因变量有三个：\code{send\_amount}（$x$，0--10）、\code{return\_amount}（$y$，0--$3x$）与
+\code{return\_ratio}（$y/(3x)$，$x=0$ 时约定为 0）。比例变量与水平变量并报：水平变量直接对应
+H1--H4 的组间比较；比例变量剔除了送出额的影响，作为「可信度」的辅助口径一并报告。
+
+送出额的输入控件是 0--10 完整可见的单选按钮组，而不是数字输入框：11 个整数值全部平铺，被试
+不会键入越界或非整数值，也是信任博弈文献的惯例做法。返还额上限随 $x$ 变化（0--$3x$），保持
+数字输入并在页面显示当前上限；三个信念比例问题保持 0--100 数字输入，页面给出「50 表示一半」
+的示例提示。这里没有把 0--100 改成滑条：oTree 无内置滑条控件，自定义控件的实现风险大于它消除
+的输入噪声。
+
+\subsection{信念：三个对象、前后两次与随机计奖}
+
+信念的引出借鉴 Dufwenberg 与 Gneezy\cite{dufwenberg2000} 的做法，在操纵之后、决策之前测量。本
+设计在消息环节之前与之后各测一次，两次都在被试做出送出或返还决策之前完成——这是从
+Dufwenberg 等\cite{dufwenberg2026} 借用的方法学要件。第二次放在决策前是有意的：受托人的二阶
+信念若在决策之后测，会被自己的决策反向污染，测出的就不是「他对对方期待的判断」而是「他对自己
+行为的合理化」。指导语里两次测量的分界写的是「消息环节之前与之后」，不用「决策之前与之后」，
+因为后者与页面顺序不符，被试会以为自己漏了页。与原设计相比，这里有两个变化：无沟通组也填一次
+假设性的事前判断；受托人的信念也有物质激励，并新增二阶信念。三个信念对象如下。
+
+\begin{table}[h]
+\centering\small
+\begin{tabular}{p{3.3cm}p{4.7cm}p{3.3cm}p{2.4cm}}
+\toprule
+对象 & 问题 & 字段 & 激励 \\
+\midrule
+A 的一阶信念 & 乙方会返还你送出金额放大 3 倍后的百分之多少？（0--100） &
+\code{belief\_return\_pct} & 10 个百分点 / 2 点 \\
+B 的一阶信念 & 你认为甲方会送出多少点？（0--10） &
+\code{belief\_\allowbreak investor\_\allowbreak send} & 2 点 / 2 点 \\
+B 的二阶信念 & 你认为，甲方相信你会返还你所收到点数的百分之多少？（0--100） &
+\code{second\_order\_...} & 与甲方报告之差 $\leq 10$ / 2 点 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+二阶信念是 Charness 与 Dufwenberg 内疚厌恶路径依赖的变量：B 若相信 A 期待自己返还很多，失信
+带来的内疚就更强。原设计只测 A 的一阶信念与 B 的一阶信念，二阶路径只能间接推断；现在 B 在
+消息环节前后各报告一次，可以直接观察承诺是否抬高了 B 所感知的 A 的期待。
+
+激励规则。A 的比例判断与实际比例相差不超过 10 个百分点，得 2 点。B 的两个判断分别计奖：送出
+点数的预测与实际相差不超过 2 点，得 2 点；二阶信念的计奖基准需要专门说明——它的真值是「甲方
+相信什么」，只能以甲方实际报告的一阶信念为基准（按 B 的抽中时点对齐，取 A 同一时点的那次
+报告），与甲方报告之差不超过 10 个百分点得 2 点。若按实际返还比例评分，二阶信念在计量上退化为
+一阶信念的同义重述——两者都以实际结果判分，区别只在措辞——测不出内疚厌恶路径所需的内容。
+三项奖金都写入指导语；未披露的激励不构成激励。按 1 点 $=$ 1 元计算，每对配对的信念奖金上限为
+6 元（A 2 点 + B 4 点），相对出场费与主收益是小额支出。
+
+二元计奖的形式有一个已知代价：全有全无加容差判定会诱发风险厌恶下的 50\% 聚集——对不确定性
+最大的被试，报 50 是期望损失最小的安全答案。这是 belief elicitation 文献的老问题，课堂预算下
+可以接受，但要在分析时预期数据中会出现 50 聚集，出现时不要把它当作「信念无信息」的证据；
+比例信念若聚在 50，改用分段线性计奖（每接近真实值 1 个百分点多得一部分）是预算允许时的改进
+方向。
+
+随机计奖时点。沟通组在消息环节前后各报告一次，程序在 \code{creating\_session} 中为每名玩家随机
+抽取其中一次作为计奖依据；同一名玩家的所有信念任务共用这个时点。被试看不到抽取结果，但指导语
+告知「会随机抽取其中一次」。若指导语不提这件事，被试会以为奖金只看消息后那次，从而给消息前
+那次随便填；而抽中消息前那次时，奖金就建立在一个没有激励的回答上。
+
+无沟通组的假设性基线。原设计无沟通组不展示决策前页面，\code{*\_before} 字段为结构性 NULL，
+四格之间的信念比较因此缺一个可比的事前基准。现在无沟通组也会看到同一页，指导语改为「假如你们
+可以交换消息，你认为对方会怎么做」，并说明这次判断只作研究基线、不参与奖金。字段
+\code{belief\_before\_hypothetical} 取 1 表示假设性基线，取 0 表示真实的事前判断。这样既保留了
+原有的流程（无消息者不会误以为真的交换了消息），也为探索性的机制描述（信念更新与行为的关系）
+提供了基线。
+
+这一做法的代价需要说明：假设性回答与真实的事前判断并不完全等同，被试在没有消息时想象的对方
+行为，可能带有更强的投射成分。因此它更适合作为基线校正的近似值，而不是与沟通组事前判断完全
+等价的测量。分析时我会同时报告「不校正基线」与「用基线校正」两套结果，观察结论是否稳健。
+
+$x=0$ 时的奖金。A 的比例奖金一律为 0。理由有两条：此时没有发生实际转移，比例无对象可评分；
+若照发，送出 0 且预测落在容差内的投资者将确定得到 $10+2=12$ 点，高于 10 点禀赋，「什么都不送」
+于是成为唯一无风险且优于禀赋的选项，会在 $x=0$ 处形成下限聚集，使信任度量向下偏。
+
+受托人的一阶奖金在 $x=0$ 时照发：若他准确预测 0 点，仍得 2 点。B 无法改变 A 送多少，因此这不
+会扭曲任何行为；只是对准确预测的报酬。二阶信念奖金在 $x=0$ 时为 0，理由与一阶不同：基准是
+甲方报告的信念，而甲方的信念奖金在 $x=0$ 时为 0、缺乏激励支撑，用它评分等于把奖金建立在一个
+没有激励的回答上。两条规则不同，导出数据时需要分开看，不能把 \code{belief\_bonus} 当作单一
+规则的结果。
+
+缺失结构。\code{*\_before} 字段现在对所有玩家都有值，不再是结构性 NULL。区分「真实事前判断」
+与「假设性基线」只能靠 \code{belief\_before\_hypothetical}；分析时不能把无沟通组的事前值直接
+当作与沟通组同质的事前测量。二阶字段只有 B 有值，A 行为 NULL，这是角色造成的结构性缺失。
+
+\subsection{诚信承诺}
+
+指导语与理解检验之后设诚信承诺页（honesty pledge），两种角色都须勾选才能继续：
+
+\begin{quote}\small
+我承诺：我在本实验中发送的消息（如可发送）以及随后填写的判断，都反映我的真实想法。
+\end{quote}
+
+无消息组同样保留本页。承诺对象是「随后填写的判断」，不是「将要发的消息」，这样四种条件接受
+相同的前置仪式，不会因条件不同产生仪式差异——若只在沟通组出现承诺页，处理效应就可能混入
+「是否被要求诚实」这一程序差异。
+
+该页对应 Dufwenberg 等\cite{dufwenberg2026} 的 honesty pledge。未勾选时由 \code{error\_message}
+拦截，机器人测试会先提交一次空表单，确认拦截确实生效；若只提交一次「已勾选」，把拦截删掉也
+不会让测试失败。
+
+\subsection{理解检验}
+
+四道题，全对才能继续，答错时计数并提示重读：
+
+\begin{table}[h]
+\centering\small
+\begin{tabular}{clc}
+\toprule
+题号 & 问题 & 正确答案 \\
+\midrule
+1 & 投资者初始获得多少点？ & 10 \\
+2 & 若投资者送出 4 点，受托人实际收到多少点？ & 12 \\
+3 & 受托人最多可以返还多少点？（用刚才的例子） & 12 \\
+4 & 发送消息会改变收益的乘子或返还规则吗？ & 0（不会） \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+第 4 题针对 cheap talk 设计最常见的失效点：若被试以为发消息能提高乘子，处理效应就不是信念更新，
+而是对收益规则的误解。尝试次数由 \code{comprehension\_attempts} 记录，答错与答对各计一次；分析
+阶段可用它做稳健性检查，但本设计不预设「按理解度剔除」的规则。
+
+\subsection{事后情绪与操纵检查}
+
+实验末页（\code{PostRound}，位于 \code{Results} 之后、问卷之前）测量四个不参与报酬的变量：
+
+\begin{table}[h]
+\centering\small
+\begin{tabular}{p{4.8cm}p{2.2cm}p{7.6cm}}
+\toprule
+字段 & 对象 & 问题 \\
+\midrule
+\code{anger\_intensity} & 投资者 & 看到乙方实际返还的金额后，你在多大程度上感到不满？（1--5） \\
+\code{trustee\_anger\_intensity} & 受托人 & 看到甲方实际送出的金额后，你在多大程度上感到不满？（1--5） \\
+\code{perceived\_message} & 收到承诺的投资者 & 你认为对方消息中表达的返还意向有多可信？（1--5） \\
+\code{perceived\_intent} & 收到意向的受托人 & 你认为对方消息中表达的送出意向有多可信？（1--5） \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+这些是操纵检查与机制辅助变量：\code{perceived\_message} / \code{perceived\_intent} 用来检验
+「被试确实读到了消息并形成了判断」，两个不满强度为愤怒机制提供描述性证据。不满是双向的：
+投资者对「返还低于预期」不满，受托人对「送出额低」也会不满——后者是信任缺失的供给侧，
+两个变量的对偶比较比单侧测量更能刻画这一轮里双方各自的失望。
+
+有一个时序上的设计考量：\code{Results} 页只显示本人信念奖金，不显示「预测 vs 实际偏差」。
+提前展示偏差会立即引发情绪，而本页的 \code{anger\_intensity} 恰好在其后测量；显示偏差会污染
+这个测量，故结算页刻意只报奖金、不报偏差。
+
+单轮设计下只测不满强度，不测论文的「有消息与无消息哪个更生气」。后者需要同一被试经历两种条件，
+本设计做不到；把它写成「复现论文的 anger 测量」会是明确的口径错误。
+
+\subsection{报酬汇总}
+
+被试报酬 = 出场费 20 元 + 本轮收益（1 点 $=$ 1 元）。投资者另加信念奖金 0 或 2 点；受托人另加
+0、2 或 4 点（一阶与二阶各 2 点）。所有金额由 \code{settings.py} 与 \code{payoffs.py} 渲染进
+指导语；模板不写字面量，测试用另一份配置重新渲染，确保文案跟着配置变。
+
+\section{实验流程}
+
+\subsection{页面序列}
+
+页面顺序由 \code{page\_sequence} 固定；括号内为该页的显示对象。
+
+\begin{table}[h]
+\centering\small
+\begin{tabular}{clp{7.0cm}}
+\toprule
+序 & 页面 & 内容与显示条件 \\
+\midrule
+1 & \code{Introduction} & 指导语；按角色与条件切换四段互斥说明 \\
+2 & \code{ComprehensionCheck} & 四道理解题；全对才能继续 \\
+3 & \code{Pledge} & 诚信承诺；未勾选时无法继续 \\
+4 & \code{BeliefBefore} & 消息环节前的判断；所有玩家都显示，无沟通组为假设性基线 \\
+5 & \code{MessageSend} & 发送方选择一条预设消息；接收方跳过 \\
+6 & \code{MessageWaitPage} & 组内等待；提交后写入 \code{promise} 派生编码 \\
+7 & \code{MessageReveal} & 接收方读取对方消息（双向组同时回显自己发的消息） \\
+8 & \code{BeliefElicit} & 消息环节后的判断；B 在这一页回答两个问题 \\
+9 & \code{InvestorDecision} & 投资者以单选按钮组决定 $x$；受托人跳过 \\
+10 & \code{DecisionWaitPage} & 等待投资者决策完成 \\
+11 & \code{TrusteeDecision} & 受托人决定 $y$；$x=0$ 时不渲染表单 \\
+12 & \code{ResultsWaitPage} & 结算收益、比例与三项信念奖金 \\
+13 & \code{Results} & 展示本轮结果、计奖时点与本人奖金 \\
+14 & \code{PostRound} & 事后情绪与操纵检查；所有玩家都显示，题目按角色与条件分派 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{并发与等待机制}
+
+同组两人并行推进，页面归属由 \code{is\_displayed} 按角色与条件决定。三处等待页承担时序安全：
+
+\begin{itemize}
+  \item \code{MessageWaitPage}：保证接收方不会早于发送方看到消息，也保证双方提交后统一写入承诺编码；
+  \item \code{DecisionWaitPage}：保证受托人看到的是投资者最终的 $x$，而不是默认值或空值；
+  \item \code{ResultsWaitPage}：保证结算发生在双方决策之后，收益、比例与奖金只计算一次。
+\end{itemize}
+
+三处等待页都用 oTree 的 \code{body\_text} 写明「正在等待对方完成本环节」：默认等待页只有转圈
+动画，被试不知道自己在等什么、要等多久，一句说明能减少等待焦虑与「页面卡住了」的误判。
+
+指导语在消息环节的通用部分向\textbf{组内双方}同时披露「消息只是意向的表达，不具约束力」。这条
+披露此前只出现在收信方读消息的那一刻，相当于条件性地只给收信方一个「别太信」的暗示，会稀释
+承诺操纵的效应；移入指导语后它成为共同知识，对双方同时生效。
+
+发送方提交后不能撤回消息；接收方只读，不能回发。这与「一次性 cheap talk」的构念一致。
+
+\subsection{演示与逐页检查工具}
+
+仓库保留四个固定条件的「演示·单步」配置与 \code{trust\_random} 的演示版，配合
+\code{\_static/global/} 下的 \code{step\_console.html} 逐页驱动浏览器机器人。演示配置带
+\code{use\_browser\_bots=True}，真实配置不带该键：它会让真实被试的页面在渲染后被 JS 自动提交，
+而数据照样入库、机器人测试照样全绿。配置守卫测试逐值断言这一点。
+
+\section{实现}
+
+\subsection{环境与目录}
+
+oTree 6.0.15，Python 3.11（conda 环境 \code{otree}）。仓库结构：
+
+\begin{quote}\small
+\begin{tabular}{ll}
+\code{settings.py} & 会话配置、报酬默认值、密钥读取 \\
+\code{trust\_game/} & 实验本体：模型、页面、模板、测试 \\
+\code{survey/} & 人口学、一般信任、风险偏好、独裁者博弈 \\
+\code{\_templates/} & oTree 页面副本与机器人单步守卫 \\
+\code{\_static/} & 单步控制台 \\
+\code{proposal.tex} & 课程研究计划（早期文档） \\
+\code{实验设计与实现报告.tex} & 本报告 \\
+\end{tabular}
+\end{quote}
+
+\code{analysis/} 已删除：本项目只交付行为实验代码，不做数据分析。
+
+\subsection{条件的单一真值来源}
+
+所有页面分派都经三个函数，不在别处直接读配置：
+
+\begin{itemize}
+  \item \code{sends\_message(player)}：本方是否为发送方，决定发送页是否显示；
+  \item \code{receives\_message(player)}：本方是否为接收方，决定消息展示页是否显示；
+  \item \code{any\_message(player)}：本组是否存在消息环节，用于指导语分支与假设性基线判定。
+\end{itemize}
+
+\code{receives\_message} 与 \code{sends\_message} 并不互补，它们是 $2\times2$ 的两个独立维度：
+双向组同为真，无沟通组同为假，两个单向组一真一假。实现中特别防止把它写成
+\code{not sends\_message}——那样双向组两人都看不到消息页、无沟通组反而会看到，而四个配置仍会
+全部跑通，没有任何运行时报错。
+
+固定条件配置从 \code{session.config} 读取两个布尔键；\code{trust\_random} 则读取每个
+\code{Player} 上的同名字段。若随机配置仍从 config 读取，两个键不存在，四格会全部退化为
+「无沟通」，页面照样渲染。
+
+\subsection{配对层随机的实现}
+
+模块级函数 \code{creating\_session} 在 \code{randomize\_cells=True} 时：
+
+\begin{enumerate}
+  \item 打乱全部被试，前一半为投资者、后一半为受托人，重建 \code{[投资者, 受托人]} 的分组矩阵；
+  \item 对每个分组独立抽取两个布尔值，写入组内两行：
+        \code{investor\_sends\_message} 与 \code{trustee\_sends\_message}；
+  \item 写入四格标签 \code{pair\_cell} 与随机化标记 \code{role\_randomized}；
+  \item 为每名玩家随机写入计奖时点 \code{belief\_paid\_timing}（无消息组固定为 \code{after}）。
+\end{enumerate}
+
+\code{creating\_session} 必须是模块级函数，不能写成 \code{Subsession} 的类方法。oTree 6 对含
+import 语句的 app 以模块为解析目标，类方法会被静默跳过，两个条件字段恒为 NULL，依赖它们的页面
+分派会走错分支而假通过。测试在任一字段为 NULL 时立刻失败，以防回归。
+
+\subsection{数据字段}
+
+\begin{longtable}{p{5.4cm}p{2.9cm}p{5.5cm}}
+\toprule
+字段 & 类型 / 范围 & 说明 \\
+\midrule
+\endhead
+\code{investor\_sends\_message} & 布尔 & 配对条件：A 可发意向 \\
+\code{trustee\_sends\_message} & 布尔 & 配对条件：B 可发承诺 \\
+\code{pair\_cell} & 字符串 & \code{none} / \code{b\_to\_a} / \code{a\_to\_b} / \code{both} \\
+\code{role\_randomized} & 布尔 & 是否经配对层随机 \\
+\code{pledge\_honesty} & 布尔 & 诚信承诺是否勾选 \\
+\code{comprehension\_attempts} & 整数 & 理解检验作答次数 \\
+\code{comp\_q1}--\code{comp\_q4} & 整数 & 四道理解题 \\
+\code{message\_investor} & 字符串 & A 的意向文案（未发送为 NULL） \\
+\code{message\_trustee} & 字符串 & B 的承诺文案（未发送为 NULL） \\
+\code{investor\_message\_strength} & 0--4 & A 意向强度编码 \\
+\code{promise\_strength} & 0--4 & B 承诺强度编码 \\
+\code{promise} & 0/1 & 派生承诺指标，写入组内两行 \\
+\code{belief\_return\_pct} & 0--100 & A 消息环节后信念 \\
+\code{belief\_return\_pct\_before} & 0--100 & A 消息环节前判断（可能为假设性基线） \\
+\code{belief\_investor\_send} & 0--10 & B 消息环节后一阶信念 \\
+\code{belief\_investor\_send\_before} & 0--10 & B 消息环节前一阶判断 \\
+% 下面两条字段名很长（texttt 不自动断行），在下划线处插入 \allowbreak
+% 允许换行，否则会溢出到第二列。
+\code{second\_\allowbreak order\_\allowbreak belief\_\allowbreak return\_\allowbreak pct} & 0--100 & B 消息环节后二阶信念 \\
+\code{second\_\allowbreak order\_\allowbreak belief\_\allowbreak return\_\allowbreak pct\_\allowbreak before} & 0--100 & B 消息环节前二阶判断 \\
+\code{belief\_before\_hypothetical} & 布尔 & 1 = 假设性基线，0 = 真实事前判断 \\
+\code{belief\_paid\_timing} & \code{before}/\code{after} & 计奖时点（所有玩家） \\
+\code{send\_amount} & 0--10 & $x$；输入控件为完整单选按钮组 \\
+\code{return\_amount} & 0--$3x$ & $y$ \\
+\code{return\_ratio} & 0--1 & $y/(3x)$；$x=0$ 记为 0 \\
+\code{belief\_bonus} & 0--4 & 本人信念奖金合计（A 0/2；B 0/2/4） \\
+\code{anger\_intensity} & 1--5 & 对返还额的不满强度（仅 A） \\
+\code{trustee\_anger\_intensity} & 1--5 & 对送出额的不满强度（仅 B） \\
+\code{perceived\_message} & 1--5 & 承诺可信度（仅收到承诺的 A） \\
+\code{perceived\_intent} & 1--5 & 意向可信度（仅收到意向的 B） \\
+\code{payoff} & 点 & oTree 标准收益字段 \\
+\bottomrule
+\end{longtable}
+
+\subsection{测试}
+
+测试分三层，全部可运行：
+
+\begin{enumerate}
+  \item 纯函数单元测试：收益公式、比例、奖金判定（含穷举有理数比对）、受托人点数奖金、消息量表、
+        承诺编码、配置守卫、演示模板副本；
+  \item 机器人测试：\code{otree test} 对五个真实配置各跑一遍，覆盖空提交被拒、第 4 题答错被拒、
+        承诺页未勾选被拒、$x=0$ 的退化路径、计奖时点的两条分支、受托人两项奖金（含 $x=0$ 照发）；
+  \item 文档同源测试：指导语文案中的容差、奖金、兑换率、出场费必须与常量/配置一致，用另一份
+        配置重新渲染以暴露模板字面量。
+\end{enumerate}
+
+本次交付的实测结果：\code{python -m unittest} 共 60 项通过；\code{trust\_none}、
+\code{trust\_b\_to\_a}、\code{trust\_a\_to\_b}、\code{trust\_both}、\code{trust\_random}
+五组机器人测试全部跑完。
+
+\subsection{已知实现陷阱}
+
+\begin{itemize}
+  \item 可空字段的读取。oTree 6 读取仍为 NULL 的字段会抛 \code{TypeError}，与该字段是否
+        \code{blank=True} 无关。故读取一律经 \code{field\_maybe\_none()}；成对写入时先用局部变量
+        接住值，再写两行。
+  \item \code{blank=True} 与空提交。\code{blank=True} 会去掉 \code{InputRequired}，wtforms 的
+        \code{Optional()} 又会抹掉空输入错误，空提交因此会静默通过。消息、返还额、B 的两个信念
+        字段都在 \code{error\_message} 中显式拒绝空值，否则该观测被静默丢弃，或在结算时读到 NULL
+        而 500。
+  \item 生成器跨请求恢复。\code{PlayerBot} 的生成器在每次请求中恢复，此前读出的 \code{player}
+        已脱离 SQLAlchemy 会话；在第一次 \code{yield} 之后再读属性会抛 \code{DetachedInstanceError}。
+        角色与条件必须提前缓存为局部变量。
+\end{itemize}
+
+\section{有效性与局限}\label{sec:limits}
+
+\subsection{构念效度：预设消息替代自由文本}
+
+预设量表便于控制强度、跨被试可比、自动编码，但限制了被试的表达，外部效度弱于论文的自由文本。
+它也无法区分「策略性承诺」与「真诚承诺」：两条文案在量表上同强度，含义却可能不同。因此
+\code{promise} 只能刻画「是否作出承诺」，不能刻画「承诺是否被相信」。这是我为可比较性付出的
+代价。
+
+\subsection{内部效度}
+
+\begin{itemize}
+  \item 条件与角色在配对层随机，同场次四格并存，去掉场次级混淆；
+  \item 四组共用同一套代码、模板、参数与前置仪式（含诚信承诺页），减少程序差异；
+  \item 无欺骗：消息由被试自行选择，不代表实验方；收益规则在指导语中披露；
+  \item 理解检验第 4 题排除「消息改变收益规则」的误解；
+  \item 消息不可撤回、接收方只读，保证「一次性承诺」的构念；
+  \item 三类信念都有激励，且计奖规则在指导语中逐项披露。
+\end{itemize}
+
+\subsection{外部效度}
+
+被试以学生为主，实验室情境与真实交易有差距；单轮、一次性、匿名，与长期合作关系中的承诺不同。
+Johnson 与 Mislin\cite{johnson2011} 的元分析已表明信任博弈行为对程序变量敏感，故本实验的效应量
+不宜直接外推到现场情境。
+
+还有一个教室场景特有的匿名性边界：同场次随机配对意味着被试知道对手是同教室的同学（虽不知道
+是谁）。若相邻而坐，视线与动作可能泄露配对线索，甚至让部分被试猜到对手是谁。采集时应安排
+间隔就座，或改为线上收数据；这条限制应写入实验记录，供分析时参考。
+
+\subsection{与 Dufwenberg 等（2026）的差异}
+
+\begin{table}[h]
+\centering\small
+\begin{tabular}{p{3.3cm}p{4.6cm}p{5.4cm}}
+\toprule
+维度 & Dufwenberg 等\cite{dufwenberg2026} & 本设计 \\
+\midrule
+博弈结构 & 信任/握持博弈 + 惩罚阶段（Take/Reject） & 标准信任博弈，无惩罚阶段 \\
+沟通方向 & 单条消息：Player 2 $\rightarrow$ Player 1 & $2\times2$：A 与 B 各自可否发送 \\
+消息形式 & 自由文本，事后人工双编码 & 5 条预设文案，$0$--$4$ 派生编码 \\
+承诺变量 & \texttt{Promise}：人工双编码 & \code{promise}：强度 $\geq 2$ 的派生指标，另设 $\geq 3$ 稳健性口径 \\
+轮次 & 多轮（20 轮）重复 & 单轮，被试间 \\
+一阶信念 & 消息前后各测，双方均有 & 消息环节前后各测，双方均有，且都有激励 \\
+二阶信念 & 未直接测量 & B 消息环节前后各测，以 A 实际报告的信念计奖 \\
+无消息组基线 & 无此测量 & 决策前假设性基线，标记为不计奖 \\
+自我承诺路径 & 未单独检验 & 由 A 样本的因子主效应析出（H4） \\
+愤怒 & 挫败—愤怒—惩罚，支持组内比较 & 只测不满强度，无法做组内比较 \\
+效率 & 以惩罚机会下的效率为结果之一 & 不测效率，只测 $x$、$y$ 与比例 \\
+样本 & 论文自有样本 & 建议每格 40--60 人，合计 160--240 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+差异来自研究问题的不同：论文检验愤怒—惩罚机制，本设计检验沟通方向的效应。因此本报告不声称
+复现论文的任何结果，只声称借用了它的若干测量要件。
+
+\subsection{统计与多重比较}
+
+正式假设四个（H1--H4），每条对应一次单自由度的组间比较；交互与中介不设正式假设，只做描述性
+报告（见第 2.3 节的说明）。即便如此，四个假设仍构成多重比较，分析阶段宜预先指定主要结果
+（H1 为主，H2--H4 为次），并报告校正后的结果或明确不做校正的理由。这部分属于分析计划，
+不在本报告的交付范围（本项目不做数据分析）。
+
+\subsection{关于假设性基线的局限}
+
+无沟通组的决策前判断是假设性的，与沟通组的真实事前判断不完全同质。若直接把它当作因果基线，
+可能低估或高估承诺对信念的更新幅度。我的处理办法是把它当作近似基线，并在探索性的机制描述中
+同时报告未校正与校正两套口径；若两者差异明显，相关描述需要谨慎表述。这一局限无法靠现有设计
+消除，只能靠事后比较两种口径来评估其影响。
+
+\section{伦理与数据}
+
+\begin{itemize}
+  \item 知情同意。实验开始前说明流程、时长、报酬规则与匿名性；被试可随时退出，退出不影响
+        已获出场费。
+  \item 无欺骗。消息由被试自行选择，实验方不伪造消息、不虚构对手；规则披露完整。
+  \item 匿名。同场次两人一组，实验结束不揭示身份；数据以会话码与被试编号标识。
+  \item 最小化。问卷只收集分析所需的人口学变量；不收集与实验无关的敏感信息。
+  \item 数据保存。原始数据与导出文件存放在受控目录，发布或共享前去标识；报告与论文只呈现
+        汇总结果。
+  \item 密钥。\code{SECRET\_KEY} 与管理员密码从环境变量读取，仓库不存真值；正式采集前需要
+        替换开发默认值。
+\end{itemize}
+
+\section{结论}
+
+本报告交付了一个可运行、可核查的 $2\times2$ 沟通信任博弈实验：单轮、被试间、条件与角色在配对层
+随机；决策前后各测一次信念并随机抽取一次计奖；诚信承诺、理解检验第 4 题、事后情绪与操纵检查
+共同构成操纵有效性的证据链。实现以 oTree 6.0.15 完成，60 项单元测试与五个配置的机器人测试全部
+通过。
+
+本设计能回答四条因子主效应：承诺对投资者送出额的方向性效应（H1）、守诺与意向两条路径对返还额
+的独立效应（H2、H3），以及 A 发出意向之后自己的送出额是否变化（H4）。每条都是单自由度的组间
+比较，检验对象与格子归属在假设列表中写明。
+
+本设计不能回答：承诺被打破时的愤怒与惩罚意愿（无惩罚阶段、单轮无法做组内比较）、长期关系中
+可验证承诺的动态（单轮一次性）、以及假设性基线能否完全替代真实的事前判断。
+
+后续扩展有三条自然路径：加入惩罚阶段以检验愤怒机制；改用自由文本并做人工双编码，以与论文的
+\texttt{Promise} 变量对齐；改为多轮区组设计，估计承诺随轮次的动态。三者都需要重新论证轮次、
+配对与支付规则，不能在现有代码上直接叠加。
+
+\begin{thebibliography}{9}\footnotesize
+\setlength{\itemsep}{2pt}
+
+\bibitem{berg1995}
+Berg, J., Dickhaut, J., \& McCabe, K. (1995). Trust, reciprocity, and social history.
+\textit{Games and Economic Behavior}, 10(1), 122--142.
+
+\bibitem{charness2006}
+Charness, G., \& Dufwenberg, M. (2006). Promises and partnership.
+\textit{Econometrica}, 74(6), 1579--1601.
+
+\bibitem{dufwenberg2000}
+Dufwenberg, M., \& Gneezy, U. (2000). Measuring beliefs in an experimental lost wallet game.
+\textit{Games and Economic Behavior}, 30, 163--182.
+
+\bibitem{dufwenberg2026}
+Dufwenberg, M., Li, F., \& Smith, A. (2026). Promises and punishment.
+\textit{Journal of Economic Behavior \& Organization}, 249, 107685.
+
+\bibitem{johnson2011}
+Johnson, N. D., \& Mislin, A. A. (2011). Trust games: A meta-analysis.
+\textit{Journal of Economic Psychology}, 32, 865--889.
+
+\bibitem{vanberg2008}
+Vanberg, C. (2008). Why do people keep their promises? An experimental test of two explanations.
+\textit{Econometrica}, 76(6), 1467--1480.
+
+\end{thebibliography}
+
+\newpage
+\appendix
+
+\section{指导语要点}
+
+指导语由 \code{trust\_game/Introduction.html} 渲染，数字全部来自程序常量与 \code{session.config}。
+以下为要点，逐字文案以模板为准。
+
+\begin{enumerate}
+  \item 通用部分。你与另一位参与者组成一组，角色由系统随机分配；全程匿名，实验结束后不揭示对方
+        身份。报酬口径前置加粗：每 1 点可兑换 1 元，另有 20 元出场费，并给出预计时长。
+        投资者获得 10 点，可选择送出 $0$--$10$ 点（页面上为完整单选按钮组）；实验者把送出额
+        乘以 3 交给受托人；受托人可返还 $0$ 到「收到金额」之间的整数点。指导语附一张收益示例
+        小表（送出 0/5/10 点时双方的收益对照），帮助被试建立直觉后再读规则。
+  \item 沟通条件。四段互斥说明按条件与角色切换：「双方都能看到对方的消息」/「对方无法向你发送
+        消息」/「你无法向对方发送任何消息」/「不会有任何信息交流」。单向组的接收方需要被明确
+        告知自己不能发送，否则会以为页面遗漏。
+  \item 消息性质。消息从预设选项中选择，需要选一条；它只表达意向或承诺，不改变收益规则，也不由
+        实验方代写。凡有消息环节的组，指导语同时向双方披露「消息只是意向的表达，不具约束力」
+        ——这条披露放在通用部分而不是只在收信方读消息时提示，避免它成为收信方的独家信息。
+  \item 信念奖金（投资者）。你需要报告预期返还比例；若与实际相差不超过 10 个百分点，获得 2 点
+        奖金。沟通组会随机抽取消息环节前后两次报告中的一次作为计奖依据。若你送出 0 点，本项
+        奖金为 0。
+  \item 信念奖金（受托人）。你需要在消息环节前后各回答两个问题：甲方会送出多少点；甲方相信你会
+        返还多少比例。前者与实际送出相差不超过 2 点得 2 点；后者的计奖基准是甲方的实际报告
+        （与甲方报告之差不超过 10 个百分点得 2 点），若甲方送出 0 点则本项为 0。沟通组随机抽取
+        其中一次计奖；无沟通组只有第二次计奖，第一次是假设性基线，不参与奖金。
+  \item 无沟通组的假设性基线。指导语会说明：「假如你们可以交换消息，你认为对方会怎么做？」
+        这次判断只作研究基线，不参与奖金。
+  \item 诚信承诺。继续之前须勾选「所发消息与随后判断都反映真实想法」。
+  \item 理解检验。四道题全对才能继续；答错可重读后重答，作答次数被记录。
+\end{enumerate}
+
+\section{变量字典}
+
+第\ref{sec:measures}节与第 6 节已给出字段表；此处补充三条使用约定：
+
+\begin{enumerate}
+  \item 条件字段是组级变量：同一配对两行取值相同。分析时不宜把它们当作个体变量，否则标准误会
+        按人数而不是按配对数计算。
+  \item \code{*\_before} 字段现在都有值，但无沟通组的那次是假设性基线。合并或比较前先看
+        \code{belief\_\allowbreak before\_\allowbreak hypothetical}，把两类事前报告分开处理。
+  \item \code{promise} 在无 B 发消息的条件为 NULL，在「未决定 / 不确定」两档为 0；区分二者须
+        结合 \code{pair\_cell}，不能只看 \code{promise}。
+\end{enumerate}
+
+\section{复现步骤}
+
+\begin{quote}\small
+\begin{tabular}{l}
+\code{conda activate otree} \\
+\code{cd otree-trust-game-repo} \\
+\code{otree resetdb} \\
+\code{otree devserver} \\
+\code{python -m unittest trust\_game.test\_payoffs trust\_game.test\_content} \\
+\code{python -m unittest trust\_game.test\_settings trust\_game.test\_demo\_templates} \\
+\code{otree test trust\_none 6} \\
+\code{otree test trust\_b\_to\_a 6} \\
+\code{otree test trust\_a\_to\_b 6} \\
+\code{otree test trust\_both 6} \\
+\code{otree test trust\_random 10} \\
+\end{tabular}
+\end{quote}
+
+真实采集在管理页选择 \code{trust\_random}；四个固定条件配置只用于演示。本项目不含数据分析步骤，
+导出数据后按第\ref{sec:design}节与第\ref{sec:measures}节的口径另行分析。
+
+\end{document}

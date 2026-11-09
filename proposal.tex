@@ -1,0 +1,190 @@
+% !TEX program = xelatex
+% 编译：xelatex proposal.tex （跑两遍以确定引用编号）
+\documentclass[10pt,a4paper]{ctexart}
+
+\usepackage[margin=1.9cm]{geometry}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage[hidelinks]{hyperref}
+
+\linespread{0.97}
+
+% ctexart/article 的默认页式是 headings：第 1 页因 \maketitle 用 plain（页码在底部），
+% 第 2 页起页眉会印出「节号+节名」与页码。两页的短文档顶一行页眉既多余又与正文重复，
+% 故统一为 plain（页码居中于页脚）。
+\pagestyle{plain}
+
+\setlist[itemize]{leftmargin=1.3em, itemsep=0.5pt, topsep=1.5pt, parsep=0pt}
+\setlist[description]{leftmargin=1.3em, itemsep=1.5pt, topsep=1.5pt, parsep=0pt}
+\titlespacing*{\section}{0pt}{6pt}{2pt}
+\titlespacing*{\subsection}{0pt}{4pt}{1pt}
+\titleformat{\section}{\normalfont\large\bfseries}{\thesection}{0.6em}{}
+\titleformat{\subsection}{\normalfont\normalsize\bfseries}{\thesubsection}{0.6em}{}
+
+\title{\vspace{-1.8em}\bfseries 沟通的方向性：承诺、意向与信任\\[2pt]
+\large 一项 $2\times2$ 信任博弈实验的研究计划}
+\author{章荣生\quad202621150313\\[1pt] \small 行为经济学课程作业}
+\date{\today}
+
+\begin{document}
+\maketitle
+\vspace{-2.4em}
+
+\section{研究背景与问题}
+
+信任是交易得以发生的前提。Berg、Dickhaut 与 McCabe\cite{berg1995} 提出的信任博弈为在
+实验室中测量信任与可信度提供了标准范式：投资者获得禀赋 $E$，选择送出 $x$；实验者将 $x$
+乘以 $m$ 后交给受托人，受托人决定返还 $y$。自利预测给出 $x=0$，但大量实验观察到 $x>0$
+且 $y>0$。Johnson 与 Mislin\cite{johnson2011} 对 162 个重复实验（逾 23{,}000 名被试）的
+元分析显示，送出额与返还额显著受支付方式、对手是否为模拟被试、乘子大小、被试是否为学生
+等因素影响——该范式所测行为对\textbf{实验程序}相当敏感。但这些程序变量回答不了信任从何
+而来，真正的问题是有哪些可干预的因素能提升它。
+
+事前沟通（cheap talk）是最受关注的干预，但\textbf{它通过什么机制起作用仍有争论}。
+Charness 与 Dufwenberg\cite{charness2006} 让双方在决策前交换消息，发现承诺显著提高可信
+行为，证据与\textbf{内疚厌恶}一致：沟通通过改变\textbf{关于信念的信念}（二阶信念）起
+作用。Vanberg\cite{vanberg2008} 则分离出另一种解释——人可能单纯偏好「守诺」本身——并
+发现承诺的效应\textbf{无法}由收益预期的变化解释，从而支持守诺偏好而非信念路径。也就是
+说：沟通有效是共识，\textbf{它经由哪条路径则尚无定论}。
+
+\section{研究缺口与本研究}
+
+现有沟通实验几乎都让\textbf{双方同时}发送消息，再与无沟通组对比。这一设计无法区分上述
+争论，因为双向沟通同时激活了多条路径：
+
+\begin{itemize}
+  \item \textbf{信念路径：} 受托人作出承诺 $\rightarrow$ 提高投资者对返还的预期
+        $\rightarrow$ 提高送出额（作用于投资者的行为 $x$）；
+  \item \textbf{守诺路径：} 受托人作出承诺 $\rightarrow$ 自身履约倾向上升
+        $\rightarrow$ 提高返还额（作用于受托人自己的行为 $y$）；
+  \item \textbf{意向路径：} 投资者表露送出意向 $\rightarrow$ 提高受托人感知到的对方期望
+        $\rightarrow$ 提高返还额。
+\end{itemize}
+
+三者在双向组里同时被激活，两组对比只能给出它们的\textbf{混合效应}，既无法分别估计，
+也回答不了「沟通的方向是否重要」。若实际上只有一条路径是主要渠道，「只要有沟通就好」
+的政策推断就失之过宽。
+
+本研究把沟通拆成 $2\times2$ 析因设计：\textbf{投资者 A 能否发送} $\times$
+\textbf{受托人 B 能否发送}，四组为无沟通、仅 $B\!\rightarrow\!A$、仅 $A\!\rightarrow\!B$、
+双向。这一安排让三条路径各自落在一个可分别估计的对比上：「B 可发」对 $x$ 的效应即
+信念路径，「B 可发」对 $y$（控制 $x$ 后）的效应即守诺路径，「A 可发」对 $y$（控制 $x$
+后）的效应即意向路径；双向组与两个单向组的关系则给出\textbf{交互作用}，据此回答双向
+沟通是否大于两条单向效应之和。
+
+\section{研究假说}
+
+\begin{description}[style=nextline]
+  \item[H1（主结果）] 受托人可以发送承诺消息时，投资者的送出额 $x$ 更高。
+  \item[H2] 投资者可以发送意向消息时，受托人的返还比例 $y/(mx)$ 更高。
+  \item[H3] 控制送出额 $x$ 之后，「B 可以发送」与「A 可以发送」对返还额 $y$ 各有独立的
+        正效应：前者是守诺路径的直接证据（承诺改变的是受托人自己的履约倾向，而非只是
+        投资者的预期），后者对应意向路径。
+  \item[H4] 「B 可以发送」对送出额的效应，部分由投资者的一阶信念中介。
+  \item[H5（探索性）] 两个因子存在交互作用：双向沟通的效应不等于两条单向效应之和。
+\end{description}
+
+\section{实验设计}
+
+\subsection{博弈与参数}
+
+单轮信任博弈，被试间设计。禀赋 $E=10$，乘子 $m=3$，返还额 $y\in[0,\,3x]$；收益为
+$A=10-x+y$ 与 $B=3x-y$，以 1 点 $=$ 1 元真实支付，另付出场费 20 元。$x=0$ 时受托人无可
+返还金额，该页不渲染表单，$y$ 自动记为 0。
+
+\subsection{处理组}
+
+\begin{table}[h]
+\centering\small
+\begin{tabular}{lccc}
+\toprule
+条件 & A 可发消息 & B 可发消息 & 消息环节 \\
+\midrule
+无沟通     & 否 & 否 & 双方均无 \\
+仅 $B\!\rightarrow\!A$（承诺） & 否 & 是 & B 发、A 看 \\
+仅 $A\!\rightarrow\!B$（意向） & 是 & 否 & A 发、B 看 \\
+双向       & 是 & 是 & 双方发、互相看 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+等待页对全组显示（含不发送的一方），故接收方不可能在消息发出前越过等待页看到它。四组
+除消息页外使用完全相同的代码、模板、参数与指导语结构；指导语按各自的信息结构切换一段
+说明并\textbf{明确告知不能发送的那一方}——否则单向组的接收方会以为页面漏了，而对信息
+结构的含糊本身会变成处理内变异。
+
+\subsection{消息与信念引出}
+
+两侧消息各为 5 条预设选项、$0$--$4$ 序数编码，编码越高表示承诺／意向越强。用封闭集合是
+为保证跨被试可比，避免书写能力与语言风格混入处理效应。B 侧为承诺（如「我承诺会把收到的
+点数全部返还给你」），A 侧为送出意向（如「我打算把全部 10 点都送给你」），两侧最弱一条
+均为「我还没有决定」。发送强制（必须选一条），接收方只读。
+
+信念的引出沿用 Dufwenberg 与 Gneezy\cite{dufwenberg2000} 的做法，在操纵之后、决策之前
+测量：A 报告「对方会返还你送出金额放大后的百分之多少」（$0$--$100$），B 报告「你认为
+对方会送出多少点」（$0$--$10$）。A 的信念带激励：预测与实际相差不超过 10 个百分点获得
+2 点奖金，该规则在指导语中向被试\textbf{明确披露}（未披露的激励不构成激励）；$x=0$ 时
+不发此项奖金。页面顺序：指导语 $\rightarrow$ 理解检验（3 题，全对才能继续）$\rightarrow$
+[消息页，按方向] $\rightarrow$ 信念引出 $\rightarrow$ 决策 $\rightarrow$ 结果。
+
+\subsection{样本量与随机化}
+
+计划 $N=120$，四组各 30 名被试（15 对）。处理组\textbf{在 session 层面}分配，每个
+session 只运行一种条件——这排除了同一实验室内不同条件被试相互交流的可能，而交流正是本
+研究的操纵变量。
+
+功效方面：两个因子的主效应各自把两个格子合并，即 60 对 60 名被试（30 对 30 对），故主
+效应的检验力与原「两组各 60」的设计相同，在 $\alpha=.05$ 双侧、power$=.80$ 下可检出
+$d\approx 0.51$。交互作用每格仅 30 人，只能检出较大效应，故 H5 定位为探索性检验。
+
+\section{分析计划}
+
+\begin{itemize}
+  \item \textbf{H1、H2：} 用 $2\times2$ 析因模型估计，两个因子取\textbf{效应编码}并纳入
+        交互项，此时因子系数即为主效应。（若用 0/1 哑变量编码，纳入交互项后该系数是简单
+        效应而非主效应，两者不可混用。）连续因变量用 OLS 加 HC1 稳健标准误，并另报按
+        session 聚类的标准误作为稳健性检验。
+  \item \textbf{H3：} $y$ 对「A 可以发送」与 $x$ 回归，报告含与不含 $x=0$、以及以水平与
+        比例作因变量的多个规格，三者结论一致方可支持 H3。
+  \item \textbf{H4：} 以「B 可以发送」为处理变量、投资者一阶信念为中介、送出额为结果的
+        中介分析，间接效应用 bootstrap（5000 次）取置信区间。
+  \item \textbf{H5：} 报告交互项的效应量与 95\% 置信区间。
+  \item \textbf{控制变量：} 风险偏好（5 行彩票菜单）、独裁者博弈送出额、一般信任量表与
+        人口学变量。
+\end{itemize}
+
+\section{预期贡献与局限}
+
+贡献在于把沟通的\textbf{方向}作为独立因子引入信任博弈，分离「受托人承诺」与「投资者
+表露意向」两条此前被合并估计的路径，并为「沟通有效」给出边界条件：它在哪个方向上有效、
+两个方向同时存在时是否相互加强。局限有二：只测量一阶信念，内疚厌恶所依赖的二阶信念未被
+直接测量，故 H4 只能间接检验信念路径；交互作用每格 30 人，只能识别较大的交互效应。
+
+\begin{thebibliography}{9}\footnotesize
+\setlength{\itemsep}{0pt}
+
+\bibitem{berg1995}
+Berg, J., Dickhaut, J., \& McCabe, K. (1995). Trust, reciprocity, and social history.
+\textit{Games and Economic Behavior}, 10(1), 122--142.
+
+\bibitem{charness2006}
+Charness, G., \& Dufwenberg, M. (2006). Promises and partnership.
+\textit{Econometrica}, 74(6), 1579--1601.
+
+\bibitem{dufwenberg2000}
+Dufwenberg, M., \& Gneezy, U. (2000). Measuring beliefs in an experimental lost wallet game.
+\textit{Games and Economic Behavior}, 30, 163--182.
+
+\bibitem{johnson2011}
+Johnson, N. D., \& Mislin, A. A. (2011). Trust games: A meta-analysis.
+\textit{Journal of Economic Psychology}, 32, 865--889.
+
+\bibitem{vanberg2008}
+Vanberg, C. (2008). Why do people keep their promises? An experimental test of two explanations.
+\textit{Econometrica}, 76(6), 1467--1480.
+
+\end{thebibliography}
+
+\end{document}
